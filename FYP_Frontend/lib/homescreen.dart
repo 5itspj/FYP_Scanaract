@@ -3,17 +3,29 @@ import 'package:android_intent_plus/android_intent.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:http/http.dart' as http;
 import 'dart:async';
+import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:intl/intl.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
 
   @override
-  State<HomeScreen> createState() => _HomeScreenState();
+  State<HomeScreen> createState() => HomeScreenState();
 }
 
 class _HomeScreenState extends State<HomeScreen> {
+class HomeScreenState extends State<HomeScreen> {
+  final _supabase = Supabase.instance.client;
+
+  Map<String, dynamic>? _profile;
+  bool _isProfileLoaded = false;
+
+  List<int> healthScores = [];
+  List<String> chartLabels = [];
+
+  List<Map<String, dynamic>> recentExaminations = [];
+
   bool _showAnimation = false;
-  final String userName = "Kristin";
   bool _isDeviceConnected = false;
   bool _isConnecting = false;
   final String _piBaseUrl = 'http://10.42.0.1:8081';
@@ -27,11 +39,69 @@ class _HomeScreenState extends State<HomeScreen> {
 
   final List<double> healthScores = [50, 55, 68, 72, 65, 78, 82];
   final List<String> chartLabels = ['9.24', '9.25', '9.26', '9.27', '9.28', '9.29', '9.30'];
+  bool _isMatching = false;
 
   @override
   void initState() {
     super.initState();
+    _loadUserProfile();
+    _loadRecentExaminations();
+    _loadRecentRecords();
+
     Future.delayed(const Duration(milliseconds: 300), () {
+      if (mounted) setState(() => _showAnimation = true);
+    });
+  }
+
+  Future<void> _loadUserProfile() async {
+    try {
+      final user = _supabase.auth.currentUser;
+      if (user == null) {
+        if (mounted) setState(() => _isProfileLoaded = true);
+        return;
+      }
+
+      final data = await _supabase
+          .from('profiles')
+          .select()
+          .eq('id', user.id)
+          .single();
+
+      if (mounted) {
+        setState(() {
+          _profile = data;
+          _isProfileLoaded = true;
+        });
+      }
+    } catch (e) {
+      debugPrint('Failed to load profile: $e');
+      if (mounted) setState(() => _isProfileLoaded = true);
+    }
+  }
+
+  Future<void> _loadRecentExaminations() async {
+    try {
+      final user = _supabase.auth.currentUser;
+      if (user == null) return;
+
+      final data = await _supabase
+          .from('examinations')
+          .select('health_index, scan_date')
+          .eq('user_id', user.id)
+          .order('scan_date', ascending: false)
+          .limit(7);
+
+      if (mounted) {
+        setState(() {
+          healthScores = data.map<int>((e) => e['health_index'] as int).toList().reversed.toList();
+          chartLabels = data.map<String>((e) {
+            final date = DateTime.parse(e['scan_date'] as String).toLocal();
+            return DateFormat('M.d').format(date);
+          }).toList().reversed.toList();
+        });
+      }
+    } catch (e) {
+      debugPrint('Failed to load chart data: $e');
       if (mounted) {
         setState(() {
           _showAnimation = true;
@@ -77,6 +147,56 @@ class _HomeScreenState extends State<HomeScreen> {
       );
       await intent.launch();
     } catch (e) {
+          healthScores = [50, 55, 68, 72, 65, 78, 82];
+          chartLabels = ['4.5', '4.6', '4.7', '4.8', '4.9', '4.10', '4.11'];
+        });
+      }
+    }
+  }
+
+  Future<void> _loadRecentRecords() async {
+    try {
+      final user = _supabase.auth.currentUser;
+      if (user == null) return;
+
+      final data = await _supabase
+          .from('examinations')
+          .select('health_index, scan_date')
+          .eq('user_id', user.id)
+          .order('scan_date', ascending: false)
+          .limit(4);
+
+      if (mounted) {
+        setState(() {
+          recentExaminations = data.map((e) {
+            final date = DateTime.parse(e['scan_date'] as String).toLocal();
+            return {
+              'date': DateFormat('MM.dd HH:mm').format(date),
+              'rating': e['health_index'],
+            };
+          }).toList();
+        });
+      }
+    } catch (e) {
+      debugPrint('Failed to load recent records: $e');
+    }
+  }
+
+  void refreshProfile() {
+    _loadUserProfile();
+    _loadRecentExaminations();
+    _loadRecentRecords();
+  }
+
+  String get userName => _profile?['full_name'] ?? 'User';
+  int get healthIndex => _profile?['health_index'] ?? 70;
+
+  void _startMatching() {
+    if (_isMatching || _isDeviceConnected) return;
+
+    setState(() => _isMatching = true);
+
+    Future.delayed(const Duration(seconds: 3), () {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Could not open Wi-Fi settings')),
@@ -201,8 +321,15 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   Widget build(BuildContext context) {
+    if (!_isProfileLoaded) {
+      return Scaffold(
+        backgroundColor: Colors.blue[50],
+        body: const Center(child: CircularProgressIndicator()),
+      );
+    }
+
     return Scaffold(
-      backgroundColor: Colors.blue.shade50,
+      backgroundColor: Colors.blue[50],
       body: SafeArea(
         child: Column(
           children: [
@@ -231,6 +358,15 @@ class _HomeScreenState extends State<HomeScreen> {
                           color: Colors.white,
                         ),
                       ),
+                      const SizedBox(height: 4),
+                      Text(
+                        'Today Health Index: $healthIndex',
+                        style: const TextStyle(
+                          fontSize: 16,
+                          color: Colors.white70,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
                     ],
                   ),
                   CircleAvatar(
@@ -238,10 +374,11 @@ class _HomeScreenState extends State<HomeScreen> {
                     backgroundColor: Colors.white,
                     child: ClipOval(
                       child: Image.network(
-                        'https://randomuser.me/api/portraits/women/44.jpg',
+                        _profile?['avatar_url'] ?? 'https://randomuser.me/api/portraits/women/44.jpg',
                         fit: BoxFit.cover,
                         width: 64,
                         height: 64,
+                        errorBuilder: (_, __, ___) => const Icon(Icons.person, size: 40, color: Colors.grey),
                       ),
                     ),
                   ),
@@ -262,10 +399,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       builder: (context, value, child) {
                         return Transform.translate(
                           offset: Offset(0, (1 - value) * 30),
-                          child: Opacity(
-                            opacity: value,
-                            child: child,
-                          ),
+                          child: Opacity(opacity: value, child: child),
                         );
                       },
                       child: InkWell(
@@ -280,6 +414,8 @@ class _HomeScreenState extends State<HomeScreen> {
                               children: [
                                 if (_isConnecting)
                                   SizedBox(
+                                if (_isMatching)
+                                  const SizedBox(
                                     width: 48,
                                     height: 48,
                                     child: CircularProgressIndicator(
@@ -302,6 +438,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                         'Camera Status',
                                         style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
                                       ),
+                                      const Text('Device status', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600)),
                                       const SizedBox(height: 4),
                                       Text(
                                         _isConnecting
@@ -309,6 +446,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                             : (_isDeviceConnected 
                                                 ? 'Connected to Scanaract_Wifi' 
                                                 : 'Not Connected'),
+                                        _isMatching ? 'Matching...' : (_isDeviceConnected ? 'Connected' : 'Disconnected'),
                                         style: TextStyle(
                                           fontSize: 16,
                                           color: _isConnecting
@@ -327,6 +465,8 @@ class _HomeScreenState extends State<HomeScreen> {
                                               color: Colors.grey,
                                               fontStyle: FontStyle.italic,
                                             ),
+                                            'Tap to start matching',
+                                            style: TextStyle(fontSize: 12, color: Colors.grey, fontStyle: FontStyle.italic),
                                           ),
                                         ),
                                       if (_isDeviceConnected && !_isConnecting)
@@ -362,7 +502,7 @@ class _HomeScreenState extends State<HomeScreen> {
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             const Text(
-                              'Health trend chart (last 7 days)',
+                              'Health trend chart (last 7 records)',
                               style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
                             ),
                             const SizedBox(height: 16),
@@ -371,38 +511,35 @@ class _HomeScreenState extends State<HomeScreen> {
                               child: Row(
                                 mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                                 crossAxisAlignment: CrossAxisAlignment.end,
-                                children: List.generate(healthScores.length, (index) {
-                                  double targetHeight = healthScores[index] * 1.8;
-                                  return Column(
-                                    mainAxisAlignment: MainAxisAlignment.end,
-                                    children: [
-                                      AnimatedContainer(
-                                        duration: const Duration(milliseconds: 1200),
-                                        curve: Curves.easeOut,
-                                        width: 35,
-                                        height: _showAnimation ? targetHeight : 0,
-                                        decoration: BoxDecoration(
-                                          color: Colors.blue.shade400,
-                                          borderRadius: const BorderRadius.vertical(top: Radius.circular(10)),
-                                          boxShadow: _showAnimation
-                                              ? [
-                                                  BoxShadow(
-                                                    color: Colors.blue.withOpacity(0.4),
-                                                    blurRadius: 8,
-                                                    offset: const Offset(0, 4),
-                                                  )
-                                                ]
-                                              : null,
+                                children: List.generate(
+                                  healthScores.length,
+                                  (index) {
+                                    double targetHeight = healthScores[index] * 1.8;
+                                    return Column(
+                                      mainAxisAlignment: MainAxisAlignment.end,
+                                      children: [
+                                        AnimatedContainer(
+                                          duration: const Duration(milliseconds: 800),
+                                          curve: Curves.easeOut,
+                                          width: 35,
+                                          height: _showAnimation ? targetHeight : 0,
+                                          decoration: BoxDecoration(
+                                            color: Colors.blue.shade400,
+                                            borderRadius: const BorderRadius.vertical(top: Radius.circular(10)),
+                                            boxShadow: _showAnimation
+                                                ? [BoxShadow(color: Colors.blue.withOpacity(0.4), blurRadius: 8, offset: const Offset(0, 4))]
+                                                : null,
+                                          ),
                                         ),
-                                      ),
-                                      const SizedBox(height: 8),
-                                      Text(
-                                        chartLabels[index],
-                                        style: const TextStyle(fontSize: 12, color: Colors.grey),
-                                      ),
-                                    ],
-                                  );
-                                }),
+                                        const SizedBox(height: 8),
+                                        Text(
+                                          chartLabels.length > index ? chartLabels[index] : '',
+                                          style: const TextStyle(fontSize: 12, color: Colors.grey),
+                                        ),
+                                      ],
+                                    );
+                                  },
+                                ),
                               ),
                             ),
                           ],
@@ -412,43 +549,36 @@ class _HomeScreenState extends State<HomeScreen> {
 
                     const SizedBox(height: 24),
 
-                    TweenAnimationBuilder<double>(
-                      tween: Tween(begin: 0.0, end: 1.0),
-                      duration: const Duration(milliseconds: 800),
-                      curve: Curves.easeOut,
-                      builder: (context, value, child) {
-                        return Transform.translate(
-                          offset: Offset(0, (1 - value) * 30),
-                          child: Opacity(
-                            opacity: value,
-                            child: child,
-                          ),
-                        );
-                      },
-                      child: Card(
-                        elevation: 3,
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-                        child: Padding(
-                          padding: const EdgeInsets.all(20),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              const Text(
-                                'Recent detection records',
-                                style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
-                              ),
-                              const SizedBox(height: 16),
-                              ...recentRecords.map((record) => Padding(
-                                    padding: const EdgeInsets.symmetric(vertical: 10),
+                    Card(
+                      elevation: 3,
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                      child: Padding(
+                        padding: const EdgeInsets.all(20),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Text(
+                              'Recent detection records',
+                              style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+                            ),
+                            const SizedBox(height: 16),
+                            if (recentExaminations.isEmpty)
+                              const Padding(
+                                padding: EdgeInsets.all(40),
+                                child: Center(child: Text('No records yet', style: TextStyle(color: Colors.grey))),
+                              )
+                            else
+                              ...recentExaminations.map((record) => Padding(
+                                    padding: const EdgeInsets.symmetric(vertical: 12),
                                     child: Row(
                                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                                       children: [
                                         Text(
-                                          record['date'],
+                                          record['date'] ?? '',
                                           style: const TextStyle(fontSize: 16, color: Colors.black87),
                                         ),
                                         Text(
-                                          'Rating: ${record['rating']}',
+                                          'Score: ${record['rating']}',
                                           style: TextStyle(
                                             fontSize: 16,
                                             fontWeight: FontWeight.bold,
@@ -458,8 +588,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                       ],
                                     ),
                                   )),
-                            ],
-                          ),
+                          ],
                         ),
                       ),
                     ),

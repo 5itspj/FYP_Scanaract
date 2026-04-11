@@ -16,13 +16,7 @@ class _MainNavigatorState extends State<MainNavigator> with TickerProviderStateM
   int _selectedIndex = 0;
   int _previousIndex = 0;
 
-  final List<Widget> _pages = [
-    HomeScreen(),
-    HistoryScreen(),
-    ScanScreen(),
-    MessageScreen(),
-    MeScreen(),
-  ];
+  late final List<Widget> _pages;
 
   late AnimationController _pulseController;
   late Animation<double> _pulseAnimation;
@@ -32,6 +26,14 @@ class _MainNavigatorState extends State<MainNavigator> with TickerProviderStateM
   @override
   void initState() {
     super.initState();
+
+    _pages = [
+      HomeScreen(),          
+      HistoryScreen(),
+      ScanScreen(),
+      MessageScreen(),
+      MeScreen(),
+    ];
 
     _pulseController = AnimationController(
       vsync: this,
@@ -115,7 +117,6 @@ class _MainNavigatorState extends State<MainNavigator> with TickerProviderStateM
               animation: Listenable.merge([_pulseAnimation, _pupilAnimation]),
               builder: (context, child) {
                 final offset = _pupilAnimation.value;
-
                 return Transform.scale(
                   scale: _pulseAnimation.value,
                   child: SizedBox(
