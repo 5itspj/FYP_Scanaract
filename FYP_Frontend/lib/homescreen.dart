@@ -1,4 +1,8 @@
 import 'package:flutter/material.dart';
+import 'package:android_intent_plus/android_intent.dart';
+import 'package:connectivity_plus/connectivity_plus.dart';
+import 'package:http/http.dart' as http;
+import 'dart:async';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -8,11 +12,12 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> {
-
   bool _showAnimation = false;
   final String userName = "Kristin";
   bool _isDeviceConnected = false;
-  bool _isMatching = false;
+  bool _isConnecting = false;
+  final String _piBaseUrl = 'http://10.42.0.1:8081';
+  
   final List<Map<String, dynamic>> recentRecords = [
     {'date': '09-24 08:30', 'rating': 82},
     {'date': '09-23 08:30', 'rating': 80},
@@ -33,30 +38,165 @@ class _HomeScreenState extends State<HomeScreen> {
         });
       }
     });
+    
+    // Check if already connected to Pi when app loads
+    _checkPiConnection();
   }
 
-  void _startMatching() {
-    if (_isMatching || _isDeviceConnected) return;
-
+  /// Check if currently on Pi network and Pi is reachable
+  Future<void> _checkPiConnection() async {
+    final connectivityResult = await Connectivity().checkConnectivity();
+    
+    if (connectivityResult == ConnectivityResult.wifi) {
+      try {
+        final response = await http.get(Uri.parse('$_piBaseUrl/photos')).timeout(
+          const Duration(seconds: 3),
+          onTimeout: () => throw Exception('Timeout'),
+        );
+        if (response.statusCode == 200) {
+          setState(() {
+            _isDeviceConnected = true;
+          });
+          return;
+        }
+      } catch (e) {
+        // Pi not reachable
+      }
+    }
+    
     setState(() {
-      _isMatching = true;
+      _isDeviceConnected = false;
     });
+  }
 
-    Future.delayed(const Duration(seconds: 3), () {
+  /// Opens system Wi-Fi settings
+  Future<void> _openWifiSettings() async {
+    try {
+      const AndroidIntent intent = AndroidIntent(
+        action: 'android.settings.WIFI_SETTINGS',
+      );
+      await intent.launch();
+    } catch (e) {
       if (mounted) {
-        setState(() {
-          _isMatching = false;
-          _isDeviceConnected = true;
-        });
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Device connected successfully!'),
-            backgroundColor: Colors.green,
-            duration: Duration(seconds: 2),
-          ),
+          const SnackBar(content: Text('Could not open Wi-Fi settings')),
         );
       }
+    }
+  }
+
+  /// Shows dialog asking user to connect to Pi Wi-Fi
+  Future<void> _showConnectionDialog() async {
+    final shouldOpenSettings = await showDialog<bool>(
+      context: context,
+      barrierDismissible: true,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          title: const Text('Connect to Camera'),
+          content: const Text(
+            'Please connect to the Scanaract_Wifi network to use the camera.\n\n'
+            'Network: Scanaract_Wifi\n'
+            'Password: scanaractpi',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(false),
+              child: const Text('Cancel'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(true),
+              style: TextButton.styleFrom(
+                foregroundColor: Colors.blue,
+              ),
+              child: const Text('Open Wi-Fi Settings'),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (shouldOpenSettings == true) {
+      await _openWifiSettings();
+    }
+  }
+
+  /// Start connection process - shows dialog to connect to Pi
+  Future<void> _startConnection() async {
+    if (_isDeviceConnected || _isConnecting) return;
+    
+    // First check if already on Pi network
+    await _checkPiConnection();
+    
+    if (_isDeviceConnected) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Already connected to camera!'),
+          backgroundColor: Colors.green,
+        ),
+      );
+      return;
+    }
+    
+    // Show dialog to guide user to connect
+    await _showConnectionDialog();
+    
+    // After returning from settings, check connection again
+    setState(() {
+      _isConnecting = true;
     });
+    
+    // Poll for connection (user might have connected)
+    await _waitForConnection();
+  }
+  
+  /// Poll Pi to check if user connected to the network
+  Future<void> _waitForConnection() async {
+    int attempts = 0;
+    const maxAttempts = 20; // 20 seconds total
+    
+    while (attempts < maxAttempts && mounted) {
+      await Future.delayed(const Duration(seconds: 1));
+      
+      final connectivityResult = await Connectivity().checkConnectivity();
+      if (connectivityResult == ConnectivityResult.wifi) {
+        try {
+          final response = await http.get(Uri.parse('$_piBaseUrl/photos')).timeout(
+            const Duration(seconds: 2),
+            onTimeout: () => throw Exception('Timeout'),
+          );
+          if (response.statusCode == 200) {
+            if (mounted) {
+              setState(() {
+                _isDeviceConnected = true;
+                _isConnecting = false;
+              });
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(
+                  content: Text('Camera connected successfully!'),
+                  backgroundColor: Colors.green,
+                ),
+              );
+            }
+            return;
+          }
+        } catch (e) {
+          // Still not connected
+        }
+      }
+      attempts++;
+    }
+    
+    if (mounted) {
+      setState(() {
+        _isConnecting = false;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Could not connect to camera. Please check Wi-Fi settings.'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
   }
 
   @override
@@ -129,7 +269,7 @@ class _HomeScreenState extends State<HomeScreen> {
                         );
                       },
                       child: InkWell(
-                        onTap: _isDeviceConnected ? null : _startMatching,
+                        onTap: _isDeviceConnected ? null : _startConnection,
                         borderRadius: BorderRadius.circular(16),
                         child: Card(
                           elevation: 3,
@@ -138,7 +278,7 @@ class _HomeScreenState extends State<HomeScreen> {
                             padding: const EdgeInsets.all(20),
                             child: Row(
                               children: [
-                                if (_isMatching)
+                                if (_isConnecting)
                                   SizedBox(
                                     width: 48,
                                     height: 48,
@@ -149,8 +289,8 @@ class _HomeScreenState extends State<HomeScreen> {
                                   )
                                 else
                                   Icon(
-                                    _isDeviceConnected ? Icons.check_circle : Icons.cancel,
-                                    color: _isDeviceConnected ? Colors.green : Colors.red,
+                                    _isDeviceConnected ? Icons.check_circle : Icons.wifi,
+                                    color: _isDeviceConnected ? Colors.green : Colors.blue,
                                     size: 48,
                                   ),
                                 const SizedBox(width: 20),
@@ -159,31 +299,45 @@ class _HomeScreenState extends State<HomeScreen> {
                                     crossAxisAlignment: CrossAxisAlignment.start,
                                     children: [
                                       const Text(
-                                        'Device status',
+                                        'Camera Status',
                                         style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
                                       ),
                                       const SizedBox(height: 4),
                                       Text(
-                                        _isMatching
-                                            ? 'Matching...'
-                                            : (_isDeviceConnected ? 'Connected' : 'Disconnected'),
+                                        _isConnecting
+                                            ? 'Connecting...'
+                                            : (_isDeviceConnected 
+                                                ? 'Connected to Scanaract_Wifi' 
+                                                : 'Not Connected'),
                                         style: TextStyle(
-                                          fontSize: 20,
-                                          color: _isMatching
+                                          fontSize: 16,
+                                          color: _isConnecting
                                               ? Colors.blue
-                                              : (_isDeviceConnected ? Colors.green : Colors.red),
+                                              : (_isDeviceConnected ? Colors.green : Colors.orange),
                                           fontWeight: FontWeight.bold,
                                         ),
                                       ),
-                                      if (!_isDeviceConnected && !_isMatching)
+                                      if (!_isDeviceConnected && !_isConnecting)
                                         const Padding(
                                           padding: EdgeInsets.only(top: 4),
                                           child: Text(
-                                            'Tap to start matching',
+                                            'Tap to connect to camera',
                                             style: TextStyle(
                                               fontSize: 12,
                                               color: Colors.grey,
                                               fontStyle: FontStyle.italic,
+                                            ),
+                                          ),
+                                        ),
+                                      if (_isDeviceConnected && !_isConnecting)
+                                        const Padding(
+                                          padding: EdgeInsets.only(top: 4),
+                                          child: Text(
+                                            'Ready to scan!',
+                                            style: TextStyle(
+                                              fontSize: 12,
+                                              color: Colors.green,
+                                              fontWeight: FontWeight.w500,
                                             ),
                                           ),
                                         ),
@@ -316,7 +470,6 @@ class _HomeScreenState extends State<HomeScreen> {
           ],
         ),
       ),
-
     );
   }
 }
