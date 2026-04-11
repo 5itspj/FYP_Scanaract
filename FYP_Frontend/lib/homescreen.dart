@@ -4,6 +4,8 @@ import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:http/http.dart' as http;
 import 'dart:async';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:intl/intl.dart';
+
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -28,8 +30,8 @@ class _HomeScreenState extends State<HomeScreen> {
   final String _piBaseUrl = 'http://10.42.0.1:8081';
   
   // ========== Chart Data ==========
-  final List<double> healthScores = [50, 55, 68, 72, 65, 78, 82];
-  final List<String> chartLabels = ['9.24', '9.25', '9.26', '9.27', '9.28', '9.29', '9.30'];
+  List<double> healthScores = [50, 55, 68, 72, 65, 78, 82];
+  List<String> chartLabels = ['9.24', '9.25', '9.26', '9.27', '9.28', '9.29', '9.30'];
 
   // ========== Getters ==========
   String get userName => _profile?['full_name'] ?? 'User';
@@ -51,9 +53,10 @@ class _HomeScreenState extends State<HomeScreen> {
     // Load Supabase data
     _loadUserProfile();
     _loadRecentExaminations();
+    _loadRecentRecords();
     
     // Check Pi connection
-    _checkPiConnection();
+    _checkPiConnection(); 
   }
 
   // ========== Supabase Methods ==========
@@ -92,25 +95,67 @@ class _HomeScreenState extends State<HomeScreen> {
   Future<void> _loadRecentExaminations() async {
     try {
       final user = _supabase.auth.currentUser;
-      if (user != null) {
-        final data = await _supabase
-            .from('examinations')
-            .select()
-            .eq('user_id', user.id)
-            .order('created_at', ascending: false)
-            .limit(4);
-        if (mounted) {
-          setState(() {
-            recentExaminations = data.map((e) => {
-              'date': e['created_at']?.toString().substring(5, 16) ?? 'Unknown',
-              'rating': e['health_score'] ?? 0,
-            }).toList();
-          });
-        }
+      if (user == null) return;
+
+      final data = await _supabase
+          .from('examinations')
+          .select('health_index, scan_date')
+          .eq('user_id', user.id)
+          .order('scan_date', ascending: false)
+          .limit(7);
+
+      if (mounted) {
+        setState(() {
+          healthScores = data.map<double>((e) => (e['health_index'] as int).toDouble()).toList().reversed.toList();
+          chartLabels = data.map<String>((e) {
+            final date = DateTime.parse(e['scan_date'] as String).toLocal();
+            return DateFormat('M.d').format(date);
+          }).toList().reversed.toList();
+        });
       }
     } catch (e) {
-      debugPrint('Error loading examinations: $e');
+      debugPrint('Failed to load chart data: $e');
+      if (mounted) {
+        setState(() {
+          healthScores = [50, 55, 68, 72, 65, 78, 82];
+          chartLabels = ['4.5', '4.6', '4.7', '4.8', '4.9', '4.10', '4.11'];
+        });
+      }
     }
+  }
+
+  Future<void> _loadRecentRecords() async {
+    try {
+      final user = _supabase.auth.currentUser;
+      if (user == null) return;
+
+      final data = await _supabase
+          .from('examinations')
+          .select('health_index, scan_date')
+          .eq('user_id', user.id)
+          .order('scan_date', ascending: false)
+          .limit(4);
+
+      if (mounted) {
+        setState(() {
+          recentExaminations = data.map((e) {
+            final date = DateTime.parse(e['scan_date'] as String).toLocal();
+            return {
+              'date': DateFormat('MM.dd HH:mm').format(date),
+              'rating': e['health_index'],
+            };
+          }).toList();
+        });
+      }
+    } catch (e) {
+      debugPrint('Failed to load recent records: $e');
+    }
+  }
+
+  void refreshProfile() {
+    _loadUserProfile();
+    _loadRecentExaminations();
+    _loadRecentRecords();
   }
 
   // ========== Pi Connection Methods ==========
