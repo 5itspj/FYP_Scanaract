@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'homescreen.dart';
 import 'historyscreen.dart';
 import 'me_screen.dart';
-import 'message_screen.dart';
+import 'about_us_screen.dart';       
 import 'scan_screen.dart';
 
 class MainNavigator extends StatefulWidget {
@@ -28,11 +28,11 @@ class _MainNavigatorState extends State<MainNavigator> with TickerProviderStateM
     super.initState();
 
     _pages = [
-      HomeScreen(),          
-      HistoryScreen(),
-      ScanScreen(),
-      MessageScreen(),
-      MeScreen(),
+      HomeScreen(),          // 0
+      HistoryScreen(),       // 1
+      ScanScreen(),          // 2
+      MeScreen(),            // 3
+      AboutUsScreen(),       // 4 
     ];
 
     _pulseController = AnimationController(
@@ -88,8 +88,8 @@ class _MainNavigatorState extends State<MainNavigator> with TickerProviderStateM
       case 0: return Offset(-maxOffset, -maxOffset);
       case 1: return Offset(-maxOffset, maxOffset);
       case 2: return Offset(0, 0);
-      case 3: return Offset(maxOffset, maxOffset);
-      case 4: return Offset(maxOffset, -maxOffset);
+      case 3: return Offset(maxOffset, maxOffset);   // Me
+      case 4: return Offset(maxOffset, -maxOffset);  // About Us
       default: return Offset(0, 0);
     }
   }
@@ -167,8 +167,8 @@ class _MainNavigatorState extends State<MainNavigator> with TickerProviderStateM
             ),
             label: 'scan',
           ),
-          const BottomNavigationBarItem(icon: Icon(Icons.message), label: 'Message'),
           const BottomNavigationBarItem(icon: Icon(Icons.person), label: 'Me'),
+          const BottomNavigationBarItem(icon: Icon(Icons.info_outline), label: 'About Us'),  
         ],
       ),
     );

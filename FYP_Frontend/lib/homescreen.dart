@@ -6,7 +6,6 @@ import 'dart:async';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:intl/intl.dart';
 
-
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
 
@@ -15,25 +14,20 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> {
-  // ========== UI Animation ==========
   bool _showAnimation = false;
   
-  // ========== Supabase Data ==========
   final SupabaseClient _supabase = Supabase.instance.client;
   Map<String, dynamic>? _profile;
   bool _isProfileLoaded = false;
   List<Map<String, dynamic>> recentExaminations = [];
   
-  // ========== Pi Connection ==========
   bool _isDeviceConnected = false;
   bool _isConnecting = false;
   final String _piBaseUrl = 'http://10.42.0.1:8081';
   
-  // ========== Chart Data ==========
   List<double> healthScores = [50, 55, 68, 72, 65, 78, 82];
   List<String> chartLabels = ['9.24', '9.25', '9.26', '9.27', '9.28', '9.29', '9.30'];
 
-  // ========== Getters ==========
   String get userName => _profile?['full_name'] ?? 'User';
   int get healthIndex => _profile?['health_index'] ?? 70;
 
@@ -41,25 +35,16 @@ class _HomeScreenState extends State<HomeScreen> {
   void initState() {
     super.initState();
     
-    // UI animation
     Future.delayed(const Duration(milliseconds: 300), () {
-      if (mounted) {
-        setState(() {
-          _showAnimation = true;
-        });
-      }
+      if (mounted) setState(() => _showAnimation = true);
     });
     
-    // Load Supabase data
     _loadUserProfile();
     _loadRecentExaminations();
     _loadRecentRecords();
-    
-    // Check Pi connection
     _checkPiConnection(); 
   }
 
-  // ========== Supabase Methods ==========
   Future<void> _loadUserProfile() async {
     try {
       final user = _supabase.auth.currentUser;
@@ -76,19 +61,11 @@ class _HomeScreenState extends State<HomeScreen> {
           });
         }
       } else {
-        if (mounted) {
-          setState(() {
-            _isProfileLoaded = true;
-          });
-        }
+        if (mounted) setState(() => _isProfileLoaded = true);
       }
     } catch (e) {
       debugPrint('Error loading profile: $e');
-      if (mounted) {
-        setState(() {
-          _isProfileLoaded = true;
-        });
-      }
+      if (mounted) setState(() => _isProfileLoaded = true);
     }
   }
 
@@ -158,7 +135,6 @@ class _HomeScreenState extends State<HomeScreen> {
     _loadRecentRecords();
   }
 
-  // ========== Pi Connection Methods ==========
   Future<void> _checkPiConnection() async {
     final connectivityResult = await Connectivity().checkConnectivity();
     
@@ -169,26 +145,18 @@ class _HomeScreenState extends State<HomeScreen> {
           onTimeout: () => throw Exception('Timeout'),
         );
         if (response.statusCode == 200) {
-          setState(() {
-            _isDeviceConnected = true;
-          });
+          setState(() => _isDeviceConnected = true);
           return;
         }
-      } catch (e) {
-        // Pi not reachable
-      }
+      } catch (e) {}
     }
     
-    setState(() {
-      _isDeviceConnected = false;
-    });
+    setState(() => _isDeviceConnected = false);
   }
 
   Future<void> _openWifiSettings() async {
     try {
-      const AndroidIntent intent = AndroidIntent(
-        action: 'android.settings.WIFI_SETTINGS',
-      );
+      const AndroidIntent intent = AndroidIntent(action: 'android.settings.WIFI_SETTINGS');
       await intent.launch();
     } catch (e) {
       if (mounted) {
@@ -212,15 +180,10 @@ class _HomeScreenState extends State<HomeScreen> {
             'Password: scanaractpi',
           ),
           actions: [
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(false),
-              child: const Text('Cancel'),
-            ),
+            TextButton(onPressed: () => Navigator.of(context).pop(false), child: const Text('Cancel')),
             TextButton(
               onPressed: () => Navigator.of(context).pop(true),
-              style: TextButton.styleFrom(
-                foregroundColor: Colors.blue,
-              ),
+              style: TextButton.styleFrom(foregroundColor: Colors.blue),
               child: const Text('Open Wi-Fi Settings'),
             ),
           ],
@@ -228,9 +191,7 @@ class _HomeScreenState extends State<HomeScreen> {
       },
     );
 
-    if (shouldOpenSettings == true) {
-      await _openWifiSettings();
-    }
+    if (shouldOpenSettings == true) await _openWifiSettings();
   }
 
   Future<void> _startConnection() async {
@@ -240,20 +201,14 @@ class _HomeScreenState extends State<HomeScreen> {
     
     if (_isDeviceConnected) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Already connected to camera!'),
-          backgroundColor: Colors.green,
-        ),
+        const SnackBar(content: Text('Already connected to camera!'), backgroundColor: Colors.green),
       );
       return;
     }
     
     await _showConnectionDialog();
     
-    setState(() {
-      _isConnecting = true;
-    });
-    
+    setState(() => _isConnecting = true);
     await _waitForConnection();
   }
   
@@ -267,10 +222,7 @@ class _HomeScreenState extends State<HomeScreen> {
       final connectivityResult = await Connectivity().checkConnectivity();
       if (connectivityResult == ConnectivityResult.wifi) {
         try {
-          final response = await http.get(Uri.parse('$_piBaseUrl/photos')).timeout(
-            const Duration(seconds: 2),
-            onTimeout: () => throw Exception('Timeout'),
-          );
+          final response = await http.get(Uri.parse('$_piBaseUrl/photos')).timeout(const Duration(seconds: 2));
           if (response.statusCode == 200) {
             if (mounted) {
               setState(() {
@@ -278,41 +230,28 @@ class _HomeScreenState extends State<HomeScreen> {
                 _isConnecting = false;
               });
               ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(
-                  content: Text('Camera connected successfully!'),
-                  backgroundColor: Colors.green,
-                ),
+                const SnackBar(content: Text('Camera connected successfully!'), backgroundColor: Colors.green),
               );
             }
             return;
           }
-        } catch (e) {
-          // Still not connected
-        }
+        } catch (e) {}
       }
       attempts++;
     }
     
     if (mounted) {
-      setState(() {
-        _isConnecting = false;
-      });
+      setState(() => _isConnecting = false);
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Could not connect to camera. Please check Wi-Fi settings.'),
-          backgroundColor: Colors.red,
-        ),
+        const SnackBar(content: Text('Could not connect to camera. Please check Wi-Fi settings.'), backgroundColor: Colors.red),
       );
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    // Show loading while profile loads
     if (!_isProfileLoaded) {
-      return const Scaffold(
-        body: Center(child: CircularProgressIndicator()),
-      );
+      return const Scaffold(body: Center(child: CircularProgressIndicator()));
     }
 
     return Scaffold(
@@ -320,7 +259,6 @@ class _HomeScreenState extends State<HomeScreen> {
       body: SafeArea(
         child: Column(
           children: [
-            // Header with gradient
             Container(
               width: double.infinity,
               padding: const EdgeInsets.fromLTRB(24, 32, 24, 60),
@@ -340,18 +278,11 @@ class _HomeScreenState extends State<HomeScreen> {
                     children: [
                       Text(
                         'Hi, $userName',
-                        style: const TextStyle(
-                          fontSize: 32,
-                          fontWeight: FontWeight.bold,
-                          color: Colors.white,
-                        ),
+                        style: const TextStyle(fontSize: 32, fontWeight: FontWeight.bold, color: Colors.white),
                       ),
                       Text(
                         'Health Index: $healthIndex',
-                        style: const TextStyle(
-                          fontSize: 16,
-                          color: Colors.white70,
-                        ),
+                        style: const TextStyle(fontSize: 16, color: Colors.white70),
                       ),
                     ],
                   ),
@@ -359,15 +290,16 @@ class _HomeScreenState extends State<HomeScreen> {
                     radius: 32,
                     backgroundColor: Colors.white,
                     child: ClipOval(
-                      child: _profile?['avatar_url'] != null
+                      child: _profile?['avatar_url'] != null && 
+                             (_profile!['avatar_url'] as String).isNotEmpty
                           ? Image.network(
                               _profile!['avatar_url'],
                               fit: BoxFit.cover,
                               width: 64,
                               height: 64,
-                              errorBuilder: (c, e, s) => const Icon(Icons.person, size: 40),
+                              errorBuilder: (c, e, s) => const Icon(Icons.person, size: 40, color: Colors.grey),
                             )
-                          : const Icon(Icons.person, size: 40, color: Colors.blue),
+                          : const Icon(Icons.person, size: 40, color: Colors.grey),
                     ),
                   ),
                 ],
@@ -388,10 +320,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       builder: (context, value, child) {
                         return Transform.translate(
                           offset: Offset(0, (1 - value) * 30),
-                          child: Opacity(
-                            opacity: value,
-                            child: child,
-                          ),
+                          child: Opacity(opacity: value, child: child),
                         );
                       },
                       child: InkWell(
@@ -479,7 +408,6 @@ class _HomeScreenState extends State<HomeScreen> {
 
                     const SizedBox(height: 24),
 
-                    // Health Trend Chart
                     Card(
                       elevation: 3,
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
@@ -538,8 +466,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     ),
 
                     const SizedBox(height: 24),
-
-                    // Recent Records
+                    
                     TweenAnimationBuilder<double>(
                       tween: Tween(begin: 0.0, end: 1.0),
                       duration: const Duration(milliseconds: 800),
@@ -547,10 +474,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       builder: (context, value, child) {
                         return Transform.translate(
                           offset: Offset(0, (1 - value) * 30),
-                          child: Opacity(
-                            opacity: value,
-                            child: child,
-                          ),
+                          child: Opacity(opacity: value, child: child),
                         );
                       },
                       child: Card(

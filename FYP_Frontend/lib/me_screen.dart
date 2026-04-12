@@ -69,8 +69,7 @@ class _MeScreenState extends State<MeScreen> {
     final user = _supabase.auth.currentUser;
     final displayName = _profile?['full_name'] ?? user?.email?.split('@')[0] ?? 'User';
     final patientId = _profile?['patient_id'] ?? 'Not set';
-    final avatarUrl = _profile?['avatar_url'] as String? ?? 
-        'https://randomuser.me/api/portraits/men/45.jpg';
+    final avatarUrl = _profile?['avatar_url'] as String? ?? '';
 
     return Scaffold(
       backgroundColor: Colors.white,
@@ -87,8 +86,15 @@ class _MeScreenState extends State<MeScreen> {
               radius: 28,
               backgroundColor: Colors.blue.shade50,
               child: ClipOval(
-                child: Image.network(avatarUrl, fit: BoxFit.cover, width: 56, height: 56,
-                    errorBuilder: (_, __, ___) => const Icon(Icons.person, size: 40, color: Colors.grey)),
+                child: avatarUrl.isNotEmpty
+                    ? Image.network(
+                        avatarUrl,
+                        fit: BoxFit.cover,
+                        width: 56,
+                        height: 56,
+                        errorBuilder: (_, __, ___) => const Icon(Icons.person, size: 40, color: Colors.grey),
+                      )
+                    : const Icon(Icons.person, size: 40, color: Colors.grey),  
               ),
             ),
           ),

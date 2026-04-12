@@ -43,8 +43,6 @@ class _HistoryScreenState extends State<HistoryScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final defaultAvatar = 'https://randomuser.me/api/portraits/women/44.jpg';
-
     return Scaffold(
       backgroundColor: Colors.grey.shade50,
       appBar: AppBar(
@@ -67,9 +65,17 @@ class _HistoryScreenState extends State<HistoryScreen> {
                         fit: BoxFit.cover,
                         width: 44,
                         height: 44,
-                        errorBuilder: (_, __, ___) => Image.network(defaultAvatar, fit: BoxFit.cover),
+                        errorBuilder: (_, __, ___) => const Icon(
+                          Icons.person,
+                          size: 28,
+                          color: Colors.grey,
+                        ),
                       )
-                    : Image.network(defaultAvatar, fit: BoxFit.cover, width: 44, height: 44),
+                    : const Icon(
+                        Icons.person,
+                        size: 28,
+                        color: Colors.grey,
+                      ),  // 灰色默认头像
               ),
             ),
           ),
@@ -143,12 +149,30 @@ class _HistoryScreenState extends State<HistoryScreen> {
     {
       'date': '2025.9.24',
       'relative': '3 days ago',
-      'report': { /* ... */ },
+      'report': {
+        'title': '[This test report - 2025-9-24]',
+        'index': '82/100',
+        'indicators': [
+          {'name': 'Turbidity density', 'value': 'Level 1 (normal)', 'arrow': '→', 'color': Colors.green},
+          {'name': 'Turbidity range', 'value': '12%', 'arrow': '↓', 'color': Colors.green},
+          {'name': 'Core Hardness', 'value': 'Level I', 'arrow': '↑', 'color': Colors.blue},
+          {'name': 'Contrast sensitivity', 'value': '90 points', 'arrow': '↑', 'color': Colors.green},
+          {'name': 'Scattered light index', 'value': '2.8', 'arrow': '↓', 'color': Colors.green},
+          {'name': 'Predicted corrected visual acuity', 'value': '0.9', 'arrow': '↑', 'color': Colors.green},
+          {'name': 'Color identification', 'value': 'Deviation value 2.5', 'arrow': '↓', 'color': Colors.green},
+        ],
+      },
     },
     {
       'date': '2025.9.23',
       'relative': '4 days ago',
-      'report': { /* ... */ },
+      'report': {
+        'title': '[This test report - 2025-9-23]',
+        'index': '75/100',
+        'indicators': [
+          {'name': 'Turbidity density', 'value': 'Level 3 (moderate)', 'arrow': '↓', 'color': Colors.red},
+        ],
+      },
     },
   ];
 }

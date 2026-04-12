@@ -168,28 +168,28 @@ class _LoginPageState extends State<LoginPage> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
+                const SizedBox(height: 40),
+                const Icon(Icons.remove_red_eye_outlined, size: 70, color: Colors.blue),
                 const SizedBox(height: 16),
-                const Icon(Icons.remove_red_eye_outlined, size: 60, color: Colors.blue),
-                const SizedBox(height: 10),
                 Text(
                   'Ocular Disease Monitor',
                   textAlign: TextAlign.center,
                   style: Theme.of(context).textTheme.headlineMedium?.copyWith(
                         fontWeight: FontWeight.bold,
                         color: Colors.blue.shade800,
-                        fontSize: 24,
+                        fontSize: 26,
                       ),
                 ),
-                const SizedBox(height: 4),
+                const SizedBox(height: 8),
                 Text(
                   'Professional · Secure · Convenient',
                   textAlign: TextAlign.center,
                   style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                         color: Colors.grey.shade600,
-                        fontSize: 12,
+                        fontSize: 14,
                       ),
                 ),
-                const SizedBox(height: 32),
+                const SizedBox(height: 40),
 
                 TextFormField(
                   controller: _emailController,
@@ -206,7 +206,7 @@ class _LoginPageState extends State<LoginPage> {
                     return null;
                   },
                 ),
-                const SizedBox(height: 16),
+                const SizedBox(height: 20),
 
                 TextFormField(
                   controller: _passwordController,
@@ -231,7 +231,7 @@ class _LoginPageState extends State<LoginPage> {
                   onFieldSubmitted: (_) => _handleLogin(),
                 ),
 
-                const SizedBox(height: 8),
+                const SizedBox(height: 12),
                 Align(
                   alignment: Alignment.centerRight,
                   child: TextButton(
@@ -239,13 +239,14 @@ class _LoginPageState extends State<LoginPage> {
                     child: const Text('Forgot password?'),
                   ),
                 ),
-                const SizedBox(height: 20),
+                const SizedBox(height: 30),
 
                 ElevatedButton(
                   onPressed: _isLoading ? null : _handleLogin,
                   style: ElevatedButton.styleFrom(
                     backgroundColor: Colors.blue.shade700,
                     foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(vertical: 16),
                   ),
                   child: _isLoading
                       ? const SizedBox(
@@ -253,39 +254,10 @@ class _LoginPageState extends State<LoginPage> {
                           width: 20,
                           child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2.5),
                         )
-                      : const Text('Sign In', style: TextStyle(fontSize: 16)),
+                      : const Text('Sign In', style: TextStyle(fontSize: 18)),
                 ),
 
-                const SizedBox(height: 20),
-                Row(
-                  children: [
-                    Expanded(child: Divider(color: Colors.grey.shade400)),
-                    Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 16),
-                      child: Text('OR', style: TextStyle(color: Colors.grey.shade600)),
-                    ),
-                    Expanded(child: Divider(color: Colors.grey.shade400)),
-                  ],
-                ),
-                const SizedBox(height: 20),
-
-                OutlinedButton.icon(
-                  onPressed: _navigateToHome,
-                  icon: Image.asset('assets/icons/google_logo.png', width: 24, height: 24,
-                      errorBuilder: (c, e, s) => const Icon(Icons.error_outline, color: Colors.red, size: 24)),
-                  label: const Text('Continue with Google'),
-                  style: OutlinedButton.styleFrom(padding: const EdgeInsets.symmetric(vertical: 14)),
-                ),
-                const SizedBox(height: 12),
-                OutlinedButton.icon(
-                  onPressed: _navigateToHome,
-                  icon: Image.asset('assets/icons/instagram_logo.png', width: 24, height: 24,
-                      errorBuilder: (c, e, s) => const Icon(Icons.error_outline, color: Colors.red, size: 24)),
-                  label: const Text('Continue with Instagram'),
-                  style: OutlinedButton.styleFrom(padding: const EdgeInsets.symmetric(vertical: 14)),
-                ),
-
-                const SizedBox(height: 24),
+                const SizedBox(height: 32),
 
                 TextButton(
                   onPressed: () {
