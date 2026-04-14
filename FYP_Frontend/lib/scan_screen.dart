@@ -7,6 +7,7 @@ import 'package:connectivity_plus/connectivity_plus.dart';
 import 'main_navigator.dart';
 import 'package:android_intent_plus/android_intent.dart';
 import 'dart:convert';
+import 'package:flutter_mjpeg/flutter_mjpeg.dart';
 
 class ScanScreen extends StatefulWidget {
   const ScanScreen({super.key});
@@ -29,15 +30,6 @@ class _ScanScreenState extends State<ScanScreen> with SingleTickerProviderStateM
   bool _isPiConnected = false;
   final String _piBaseUrl = 'http://10.42.0.1:8081';
 
-  final List<String> _prompts = [
-    "Tap the camera button to capture photo",
-    "Position your eye in the center",
-    "Keep your face steady",
-    "Hold the phone at eye level",
-    "Processing photo...",
-  ];
-
-  int _currentPromptIndex = 0;
   final _supabase = Supabase.instance.client;
 
   @override
@@ -57,8 +49,6 @@ class _ScanScreenState extends State<ScanScreen> with SingleTickerProviderStateM
     Future.delayed(const Duration(milliseconds: 500), () {
       _checkPiConnection();
     });
-    
-    Future.delayed(const Duration(seconds: 5), _nextPrompt);
   }
 
   @override
@@ -68,14 +58,6 @@ class _ScanScreenState extends State<ScanScreen> with SingleTickerProviderStateM
     Future.delayed(const Duration(milliseconds: 200), () {
       _checkPiConnection();
     });
-  }
-
-  void _nextPrompt() {
-    if (!mounted) return;
-    setState(() {
-      _currentPromptIndex = (_currentPromptIndex + 1) % _prompts.length;
-    });
-    Future.delayed(const Duration(seconds: 5), _nextPrompt);
   }
 
   // ========== Pi Connection Check with Retry ==========
@@ -104,7 +86,6 @@ class _ScanScreenState extends State<ScanScreen> with SingleTickerProviderStateM
           return;
         }
       } catch (e) {
-        // Wait before retry
         if (i < retries - 1) {
           await Future.delayed(const Duration(milliseconds: 500));
         }
@@ -118,94 +99,106 @@ class _ScanScreenState extends State<ScanScreen> with SingleTickerProviderStateM
     }
   }
 
-  // ========== Capture Photo from Pi ==========
-  Future<void> _capturePhoto() async {
-    // First, check connection again
-    await _checkPiConnection();
-    
-    if (!_isPiConnected) {
-      final shouldConnect = await _showPiConnectionDialog();
-      if (shouldConnect) {
-        await _openWifiSettings();
-        // After returning from settings, check connection
-        await _checkPiConnection(retries: 5);
-        if (!_isPiConnected) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Still not connected. Please connect to Scanaract_Wifi'),
-              backgroundColor: Colors.red,
-            ),
-          );
-          return;
-        }
-      } else {
+  // ========== Retake Photo - Go back to live stream ==========
+  void _retakePhoto() {
+    setState(() {
+      _capturedImageFile = null;
+      _capturedImageUrl = null;
+    });
+  }
+
+ // ========== Capture Photo from Pi ==========
+Future<void> _capturePhoto() async {
+  await _checkPiConnection();
+  
+  if (!_isPiConnected) {
+    final shouldConnect = await _showPiConnectionDialog();
+    if (shouldConnect) {
+      await _openWifiSettings();
+      await _checkPiConnection(retries: 5);
+      if (!_isPiConnected) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Still not connected. Please connect to Scanaract_Wifi'),
+            backgroundColor: Colors.red,
+          ),
+        );
         return;
       }
-    }
-    
-    setState(() {
-      _isCapturing = true;
-      _capturedImageUrl = null;
-      _capturedImageFile = null;
-    });
-    
-    try {
-      // Step 1: Tell Pi to capture photo
-      final captureResponse = await http.get(
-        Uri.parse('$_piBaseUrl/capture'),
-      ).timeout(const Duration(seconds: 10));
-      
-      if (captureResponse.statusCode != 200) {
-        throw Exception('Failed to capture photo');
-      }
-      
-      // Parse the JSON response
-      final Map<String, dynamic> result = jsonDecode(captureResponse.body);
-      final String filename = result['filename'];
-      
-      // Step 2: Download the photo from Pi
-      final imageResponse = await http.get(
-        Uri.parse('$_piBaseUrl/static/photos/$filename'),
-      ).timeout(const Duration(seconds: 10));
-      
-      if (imageResponse.statusCode != 200) {
-        throw Exception('Failed to download photo');
-      }
-      
-      // Step 3: Save to local temp file
-      final tempDir = await getTemporaryDirectory();
-      final file = File('${tempDir.path}/$filename');
-      await file.writeAsBytes(imageResponse.bodyBytes);
-      
-      // Step 4: Update UI
-      if (mounted) {
-        setState(() {
-          _capturedImageFile = file;
-          _capturedImageUrl = '$_piBaseUrl/static/photos/$filename';
-          _currentPromptIndex = 4;
-        });
-        
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Photo captured successfully!'), backgroundColor: Colors.green),
-        );
-      }
-      
-    } catch (e) {
-      print('Capture error: $e');
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Capture failed: ${e.toString().substring(0, 100)}'), backgroundColor: Colors.red),
-        );
-      }
-    } finally {
-      if (mounted) {
-        setState(() {
-          _isCapturing = false;
-        });
-      }
+    } else {
+      return;
     }
   }
   
+  setState(() {
+    _isCapturing = true;
+  });
+  
+  try {
+    // Step 1: Show a "capturing" overlay immediately
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('📸 Capturing... hold still!'),
+          duration: Duration(milliseconds: 800),
+          backgroundColor: Colors.blue,
+        ),
+      );
+    }
+    
+    // Step 2: Add a small delay to let user stabilize
+    await Future.delayed(const Duration(milliseconds: 300));
+    
+    // Step 3: Take the photo
+    final captureResponse = await http.get(
+      Uri.parse('$_piBaseUrl/capture'),
+    ).timeout(const Duration(seconds: 10));
+    
+    if (captureResponse.statusCode != 200) {
+      throw Exception('Failed to capture photo');
+    }
+    
+    final Map<String, dynamic> result = jsonDecode(captureResponse.body);
+    final String filename = result['filename'];
+    
+    final imageResponse = await http.get(
+      Uri.parse('$_piBaseUrl/static/photos/$filename'),
+    ).timeout(const Duration(seconds: 10));
+    
+    if (imageResponse.statusCode != 200) {
+      throw Exception('Failed to download photo');
+    }
+    
+    final tempDir = await getTemporaryDirectory();
+    final file = File('${tempDir.path}/$filename');
+    await file.writeAsBytes(imageResponse.bodyBytes);
+    
+    if (mounted) {
+      setState(() {
+        _capturedImageFile = file;
+        _capturedImageUrl = '$_piBaseUrl/static/photos/$filename';
+      });
+      
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Photo captured! Review below'), backgroundColor: Colors.green),
+      );
+    }
+    
+  } catch (e) {
+    print('Capture error: $e');
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Capture failed: ${e.toString().substring(0, 100)}'), backgroundColor: Colors.red),
+      );
+    }
+  } finally {
+    if (mounted) {
+      setState(() {
+        _isCapturing = false;
+      });
+    }
+  }
+}
   // ========== Show Pi Connection Dialog ==========
   Future<bool> _showPiConnectionDialog() async {
     return await showDialog<bool>(
@@ -258,7 +251,6 @@ class _ScanScreenState extends State<ScanScreen> with SingleTickerProviderStateM
     setState(() => _isUploading = true);
     
     try {
-      // Step 1: Show dialog telling user to disconnect from Pi Wi-Fi
       await showDialog(
         context: context,
         barrierDismissible: false,
@@ -282,7 +274,6 @@ class _ScanScreenState extends State<ScanScreen> with SingleTickerProviderStateM
         ),
       );
       
-      // Step 2: Simulate AI processing (placeholder) with a snackbar instead
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('Processing scan with AI...'),
@@ -292,7 +283,6 @@ class _ScanScreenState extends State<ScanScreen> with SingleTickerProviderStateM
       
       await Future.delayed(const Duration(seconds: 3));
       
-      // Step 3: Show completion dialog
       if (mounted) {
         await showDialog(
           context: context,
@@ -307,7 +297,6 @@ class _ScanScreenState extends State<ScanScreen> with SingleTickerProviderStateM
               TextButton(
                 onPressed: () {
                   Navigator.of(context).pop();
-                  // Navigate back to home
                   Navigator.pushReplacement(
                     context,
                     MaterialPageRoute(builder: (context) => const MainNavigator()),
@@ -320,7 +309,6 @@ class _ScanScreenState extends State<ScanScreen> with SingleTickerProviderStateM
         );
       }
       
-      // Clear captured image after upload
       setState(() {
         _capturedImageFile = null;
         _capturedImageUrl = null;
@@ -335,46 +323,6 @@ class _ScanScreenState extends State<ScanScreen> with SingleTickerProviderStateM
     } finally {
       if (mounted) setState(() => _isUploading = false);
     }
-  }
-  
-  Future<int?> _showHealthIndexDialog() async {
-    final controller = TextEditingController();
-    return await showDialog<int>(
-      context: context,
-      barrierDismissible: false,
-      builder: (context) {
-        return AlertDialog(
-          title: const Text('Enter Health Index'),
-          content: TextField(
-            controller: controller,
-            keyboardType: TextInputType.number,
-            decoration: const InputDecoration(
-              labelText: 'Health Index (0-100)',
-              hintText: 'Enter a number between 0-100',
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(null),
-              child: const Text('Cancel'),
-            ),
-            TextButton(
-              onPressed: () {
-                final value = int.tryParse(controller.text.trim());
-                if (value != null && value >= 0 && value <= 100) {
-                  Navigator.of(context).pop(value);
-                } else {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('Please enter a number between 0-100')),
-                  );
-                }
-              },
-              child: const Text('OK'),
-            ),
-          ],
-        );
-      },
-    );
   }
 
   @override
@@ -394,13 +342,11 @@ class _ScanScreenState extends State<ScanScreen> with SingleTickerProviderStateM
         title: const Text('Scanning', style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold)),
         centerTitle: true,
         actions: [
-          // Refresh button
           IconButton(
             icon: const Icon(Icons.refresh),
             onPressed: () => _checkPiConnection(retries: 3),
             color: Colors.blue,
           ),
-          // Pi connection indicator
           Container(
             margin: const EdgeInsets.only(right: 16),
             child: Row(
@@ -430,11 +376,12 @@ class _ScanScreenState extends State<ScanScreen> with SingleTickerProviderStateM
             children: [
               const SizedBox(height: 20),
 
-              // Captured Photo Preview or Camera Animation
+              // Live Stream or Captured Photo Preview
               if (_capturedImageFile != null)
+                // Show captured photo preview
                 Container(
-                  width: 280,
-                  height: 280,
+                  width: 350,
+                  height: 350,
                   decoration: BoxDecoration(
                     color: Colors.white,
                     borderRadius: BorderRadius.circular(20),
@@ -447,12 +394,48 @@ class _ScanScreenState extends State<ScanScreen> with SingleTickerProviderStateM
                     child: Image.file(
                       _capturedImageFile!,
                       fit: BoxFit.cover,
-                      width: 280,
-                      height: 280,
+                      width: 350,
+                      height: 350,
+                    ),
+                  ),
+                )
+              else if (_isPiConnected)
+                // Live MJPEG Stream from Pi
+                Container(
+                  width: 350,
+                  height: 350,
+                  decoration: BoxDecoration(
+                    color: Colors.black,
+                    borderRadius: BorderRadius.circular(20),
+                    boxShadow: [
+                      BoxShadow(color: Colors.blue.withOpacity(0.3), blurRadius: 30, spreadRadius: 10),
+                    ],
+                  ),
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(20),
+                    child: Mjpeg(
+                      stream: '$_piBaseUrl/video_feed',
+                      isLive: true,
+                      error: (context, error, stack) {
+                        return const Center(
+                          child: Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Icon(Icons.videocam_off, size: 50, color: Colors.grey),
+                              SizedBox(height: 10),
+                              Text('Connecting to camera...', style: TextStyle(color: Colors.white)),
+                            ],
+                          ),
+                        );
+                      },
+                      loading: (context) => const Center(
+                        child: CircularProgressIndicator(color: Colors.white),
+                      ),
                     ),
                   ),
                 )
               else
+                // Offline animation
                 ScaleTransition(
                   scale: _pulseAnimation,
                   child: Container(
@@ -468,16 +451,16 @@ class _ScanScreenState extends State<ScanScreen> with SingleTickerProviderStateM
                     child: Column(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
-                        const Icon(Icons.remove_red_eye, size: 80, color: Colors.blue),
-                        const SizedBox(height: 24),
-                        AnimatedSwitcher(
-                          duration: const Duration(milliseconds: 800),
-                          child: Text(
-                            _prompts[_currentPromptIndex],
-                            key: ValueKey<int>(_currentPromptIndex),
-                            textAlign: TextAlign.center,
-                            style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w500, color: Colors.black87),
-                          ),
+                        const Icon(Icons.wifi_off, size: 60, color: Colors.grey),
+                        const SizedBox(height: 16),
+                        Text(
+                          'Not Connected',
+                          style: TextStyle(fontSize: 18, fontWeight: FontWeight.w500, color: Colors.grey[600]),
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          'Tap refresh to connect',
+                          style: TextStyle(fontSize: 14, color: Colors.grey[400]),
                         ),
                       ],
                     ),
@@ -486,7 +469,7 @@ class _ScanScreenState extends State<ScanScreen> with SingleTickerProviderStateM
 
               const SizedBox(height: 30),
 
-              // Capture Button
+              // Capture Button (when no photo captured yet)
               if (_capturedImageFile == null)
                 ElevatedButton.icon(
                   onPressed: _isCapturing ? null : _capturePhoto,
@@ -510,14 +493,15 @@ class _ScanScreenState extends State<ScanScreen> with SingleTickerProviderStateM
                   ),
                 )
               else
+                // Retake and Upload buttons (when photo is captured)
                 Column(
                   children: [
                     Row(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
                         ElevatedButton.icon(
-                          onPressed: _isUploading ? null : _capturePhoto,
-                          icon: const Icon(Icons.camera_alt),
+                          onPressed: _isUploading ? null : _retakePhoto,
+                          icon: const Icon(Icons.refresh),
                           label: const Text('Retake'),
                           style: ElevatedButton.styleFrom(
                             backgroundColor: Colors.grey,
@@ -548,7 +532,7 @@ class _ScanScreenState extends State<ScanScreen> with SingleTickerProviderStateM
                     ),
                     const SizedBox(height: 16),
                     const Text(
-                      'Tap Upload to save this scan to your history',
+                      'Tap Retake to go back to live view, or Upload to save',
                       style: TextStyle(fontSize: 12, color: Colors.grey),
                     ),
                   ],
@@ -606,7 +590,7 @@ class _ScanScreenState extends State<ScanScreen> with SingleTickerProviderStateM
     );
   }
   
-  // Keep your existing manual upload method
+  // Manual upload method
   Future<void> _uploadHealthIndex() async {
     final input = _healthIndexController.text.trim();
     if (input.isEmpty) {
