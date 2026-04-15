@@ -259,7 +259,7 @@ class _ScanScreenState extends State<ScanScreen>
 
   // ========== Upload Captured Photo (Placeholder) ==========
   Future<void> _uploadCapturedPhoto() async {
-    if (_capturedImageFile == null) return;
+    // if (_capturedImageFile == null) return;
 
     setState(() => _isUploading = true);
 
@@ -298,6 +298,9 @@ class _ScanScreenState extends State<ScanScreen>
       final bytes = await _capturedImageFile!.readAsBytes();
       final base64Image = base64Encode(bytes);
       final String dataUri = 'data:image/jpeg;base64,$base64Image';
+      // 测试url
+      final String testImageUrl =
+          'https://i.ibb.co/MyPdRj0v/photo-20260415-115011.jpg';
 
       // === 步骤 3：发送 POST 请求，获取 EVENT_ID ===
       final postUrl = Uri.parse('$_gradioBaseUrl/gradio_api/call/predict');
@@ -308,7 +311,8 @@ class _ScanScreenState extends State<ScanScreen>
             body: jsonEncode({
               "data": [
                 {
-                  "path": dataUri,
+                  // "path": dataUri,
+                  "path": testImageUrl,
                   "meta": {"_type": "gradio.FileData"},
                 },
               ],
@@ -625,7 +629,9 @@ class _ScanScreenState extends State<ScanScreen>
               // Capture Button (when no photo captured yet)
               if (_capturedImageFile == null)
                 ElevatedButton.icon(
-                  onPressed: _isCapturing ? null : _capturePhoto,
+                  onPressed: _isCapturing
+                      ? null
+                      : _uploadCapturedPhoto, //_capturePhoto,
                   icon: _isCapturing
                       ? const SizedBox(
                           width: 24,
