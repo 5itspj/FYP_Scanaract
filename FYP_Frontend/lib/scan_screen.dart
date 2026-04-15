@@ -49,7 +49,6 @@ class _ScanScreenState extends State<ScanScreen>
       CurvedAnimation(parent: _pulseController, curve: Curves.easeInOut),
     );
 
-    // Check Pi connection after a short delay
     Future.delayed(const Duration(milliseconds: 500), () {
       _checkPiConnection();
     });
@@ -58,13 +57,12 @@ class _ScanScreenState extends State<ScanScreen>
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    // Re-check when screen becomes visible
     Future.delayed(const Duration(milliseconds: 200), () {
       _checkPiConnection();
     });
   }
 
-  // ========== Pi Connection Check with Retry ==========
+  // ========== Pi Connection Check ==========
   Future<void> _checkPiConnection({int retries = 3}) async {
     final connectivityResult = await Connectivity().checkConnectivity();
 
@@ -103,7 +101,7 @@ class _ScanScreenState extends State<ScanScreen>
     }
   }
 
-  // ========== Retake Photo - Go back to live stream ==========
+  // ========== Retake Photo ==========
   void _retakePhoto() {
     setState(() {
       _capturedImageFile = null;
@@ -123,9 +121,7 @@ class _ScanScreenState extends State<ScanScreen>
         if (!_isPiConnected) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
-              content: Text(
-                'Still not connected. Please connect to Scanaract_Wifi',
-              ),
+              content: Text('Still not connected. Please connect to Scanaract_Wifi'),
               backgroundColor: Colors.red,
             ),
           );
@@ -141,7 +137,6 @@ class _ScanScreenState extends State<ScanScreen>
     });
 
     try {
-      // Step 1: Show a "capturing" overlay immediately
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
@@ -152,10 +147,8 @@ class _ScanScreenState extends State<ScanScreen>
         );
       }
 
-      // Step 2: Add a small delay to let user stabilize
       await Future.delayed(const Duration(milliseconds: 300));
 
-      // Step 3: Take the photo
       final captureResponse = await http
           .get(Uri.parse('$_piBaseUrl/capture'))
           .timeout(const Duration(seconds: 10));
@@ -194,10 +187,11 @@ class _ScanScreenState extends State<ScanScreen>
       }
     } catch (e) {
       print('Capture error: $e');
+      final msg = e.toString();
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Capture failed: ${e.toString().substring(0, 100)}'),
+            content: Text('Capture failed: ${msg.length > 100 ? msg.substring(0, 100) : msg}'),
             backgroundColor: Colors.red,
           ),
         );
@@ -257,18 +251,28 @@ class _ScanScreenState extends State<ScanScreen>
     }
   }
 
-  // ========== Upload Captured Photo (Placeholder) ==========
+  // ========== Upload Captured Photo to Cloud AI ==========
   Future<void> _uploadCapturedPhoto() async {
-    // if (_capturedImageFile == null) return;
+    if (_capturedImageFile == null) {
+      // If no image captured yet, just capture one
+      await _capturePhoto();
+      if (_capturedImageFile == null) return;
+    }
 
     setState(() => _isUploading = true);
 
     try {
+      // First, get the image data BEFORE disconnecting
+      final bytes = await _capturedImageFile!.readAsBytes();
+      final base64Image = base64Encode(bytes);
+      final String dataUri = 'data:image/jpeg;base64,$base64Image';
+
+      // Show dialog telling user to disconnect from Pi Wi-Fi
       await showDialog(
         context: context,
         barrierDismissible: false,
         builder: (context) => AlertDialog(
-          title: const Text('Upload to Cloud'),
+          title: const Text('Upload to Cloud AI'),
           content: const Text(
             'Your phone is currently connected to Scanaract_Wifi.\n\n'
             'To upload to cloud, please:\n'
@@ -287,22 +291,42 @@ class _ScanScreenState extends State<ScanScreen>
         ),
       );
 
+      // Wait for network to switch to mobile data
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Processing scan with AI...'),
-          duration: Duration(seconds: 3),
+          content: Text('📡 Connecting to cloud...'),
+          duration: Duration(seconds: 2),
+        ),
+      );
+      await Future.delayed(const Duration(seconds: 3));
+
+      // Show processing
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('🤖 AI analyzing your eye scan...'),
+          duration: Duration(seconds: 2),
         ),
       );
 
-      // === 步骤 2：将图片转换为 Base64 (Data URI) ===
-      final bytes = await _capturedImageFile!.readAsBytes();
-      final base64Image = base64Encode(bytes);
-      final String dataUri = 'data:image/jpeg;base64,$base64Image';
-      // 测试url
-      final String testImageUrl =
-          'https://i.ibb.co/MyPdRj0v/photo-20260415-115011.jpg';
+      // Step 1: Upload to Supabase Storage first (to get public URL)
+      final user = _supabase.auth.currentUser;
+      if (user == null) throw Exception('Not logged in');
 
-      // === 步骤 3：发送 POST 请求，获取 EVENT_ID ===
+      final fileName = 'scan_${DateTime.now().millisecondsSinceEpoch}.jpg';
+      final filePath = 'scans/${user.id}/$fileName';
+
+      // Upload to Supabase Storage
+      await _supabase.storage.from('inspection_results').uploadBinary(
+            filePath,
+            bytes,
+            fileOptions: const FileOptions(contentType: 'image/jpeg'),
+          );
+
+      // Get public URL
+      final imageUrl = _supabase.storage.from('inspection_results').getPublicUrl(filePath);
+      print('Image uploaded to: $imageUrl');
+
+      // Step 2: Send to Gradio API
       final postUrl = Uri.parse('$_gradioBaseUrl/gradio_api/call/predict');
       final postResponse = await http
           .post(
@@ -311,14 +335,13 @@ class _ScanScreenState extends State<ScanScreen>
             body: jsonEncode({
               "data": [
                 {
-                  // "path": dataUri,
-                  "path": testImageUrl,
+                  "path": imageUrl,
                   "meta": {"_type": "gradio.FileData"},
                 },
               ],
             }),
           )
-          .timeout(const Duration(seconds: 15));
+          .timeout(const Duration(seconds: 30));
 
       if (postResponse.statusCode != 200) {
         throw Exception('Failed to submit prediction: ${postResponse.body}');
@@ -331,12 +354,9 @@ class _ScanScreenState extends State<ScanScreen>
         throw Exception('Server did not return an event_id.');
       }
 
-      // === 步骤 4：发送 GET 请求监听数据流，获取最终结果 ===
-      final getUrl = Uri.parse(
-        '$_gradioBaseUrl/gradio_api/call/predict/$eventId',
-      );
+      // Step 3: Get results
+      final getUrl = Uri.parse('$_gradioBaseUrl/gradio_api/call/predict/$eventId');
 
-      // 因为是流式响应 (Stream)，我们需要用 http.Client 的 send 方法
       final client = http.Client();
       final request = http.Request('GET', getUrl);
       final streamedResponse = await client
@@ -347,71 +367,62 @@ class _ScanScreenState extends State<ScanScreen>
       String finalDetails = '';
       bool isComplete = false;
 
-      // 逐行读取 SSE 数据流
       final stream = streamedResponse.stream
           .transform(utf8.decoder)
           .transform(const LineSplitter());
 
       await for (var line in stream) {
         if (line.startsWith('event: complete')) {
-          // 标记为完成，下一行通常就是我们要的数据
           isComplete = true;
         } else if (isComplete && line.startsWith('data: ')) {
-          // 提取并解析真正的 JSON 结果
-          final dataStr = line.substring(6); // 截掉前面的 "data: "
+          final dataStr = line.substring(6);
           final List<dynamic> resultData = jsonDecode(dataStr);
-
-          // 根据你的文档，[0] 是 Prediction (String)，[1] 是 Details (String)
           if (resultData.isNotEmpty) {
             finalPrediction = resultData[0]?.toString() ?? 'No prediction';
             if (resultData.length > 1) {
               finalDetails = resultData[1]?.toString() ?? 'No details';
             }
           }
-          break; // 拿到结果后立刻跳出循环
+          break;
         } else if (line.startsWith('event: error')) {
-          throw Exception(
-            'AI model encountered an error processing the image.',
-          );
+          throw Exception('AI model encountered an error.');
         }
       }
-      client.close(); // 记得关闭客户端释放资源
+      client.close();
 
       if (!isComplete) {
-        throw Exception('Connection closed before AI finished analyzing.');
+        throw Exception('Connection closed before AI finished.');
       }
 
-      // === 步骤 5：解析结果并存入 Supabase ===
-      // 这里你可以根据模型的实际输出字符串，自己写一段逻辑把它转换成 0-100 的 Health Index
-      int calculatedHealthIndex = 50; // 默认值
-      if (finalPrediction.toLowerCase().contains('normal')) {
+      // Step 4: Calculate health index
+      int calculatedHealthIndex = 50;
+      final lowerPrediction = finalPrediction.toLowerCase();
+      if (lowerPrediction.contains('normal') || lowerPrediction.contains('healthy')) {
         calculatedHealthIndex = 100;
-      } else if (finalPrediction.toLowerCase().contains('cataract')) {
+      } else if (lowerPrediction.contains('cataract')) {
         calculatedHealthIndex = 20;
       }
 
-      final user = _supabase.auth.currentUser;
-      if (user != null) {
-        final nowLocal = DateTime.now().toLocal();
-        await _supabase.from('examinations').insert({
-          'user_id': user.id,
-          'health_index': calculatedHealthIndex,
-          'scan_date': nowLocal.toIso8601String(),
-          'notes': 'AI Result: $finalPrediction\nDetails: $finalDetails',
-        });
-      }
-
-      // await Future.delayed(const Duration(seconds: 3));
+      // Step 5: Save to Supabase Database
+      final nowLocal = DateTime.now().toLocal();
+      await _supabase.from('examinations').insert({
+        'user_id': user.id,
+        'health_index': calculatedHealthIndex,
+        'scan_date': nowLocal.toIso8601String(),
+        'notes': 'AI Result: $finalPrediction\nDetails: $finalDetails',
+        'image_url': imageUrl,
+      });
 
       if (mounted) {
         await showDialog(
           context: context,
           builder: (context) => AlertDialog(
-            title: const Text('Upload Complete'),
-            content: const Text(
-              'Your scan has been submitted to AI.\n\n'
-              'Results will appear in your History tab.\n'
-              'You can reconnect to Scanaract_Wifi to scan again.',
+            title: const Text('✅ Upload Complete'),
+            content: Text(
+              'AI Analysis Result:\n\n'
+              'Prediction: $finalPrediction\n\n'
+              'Health Index: $calculatedHealthIndex/100\n\n'
+              'Results saved to your history.',
             ),
             actions: [
               TextButton(
@@ -419,9 +430,7 @@ class _ScanScreenState extends State<ScanScreen>
                   Navigator.of(context).pop();
                   Navigator.pushReplacement(
                     context,
-                    MaterialPageRoute(
-                      builder: (context) => const MainNavigator(),
-                    ),
+                    MaterialPageRoute(builder: (context) => const MainNavigator()),
                   );
                 },
                 child: const Text('OK'),
@@ -436,11 +445,13 @@ class _ScanScreenState extends State<ScanScreen>
         _capturedImageUrl = null;
       });
     } catch (e) {
+      print('Upload error: $e');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Upload failed: $e'),
+            content: Text('Upload failed: ${e.toString().substring(0, 150)}'),
             backgroundColor: Colors.red,
+            duration: const Duration(seconds: 5),
           ),
         );
       }
@@ -463,10 +474,7 @@ class _ScanScreenState extends State<ScanScreen>
       appBar: AppBar(
         backgroundColor: Colors.white,
         elevation: 0,
-        title: const Text(
-          'Scanning',
-          style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
-        ),
+        title: const Text('Scanning', style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold)),
         centerTitle: true,
         actions: [
           IconButton(
@@ -505,7 +513,6 @@ class _ScanScreenState extends State<ScanScreen>
 
               // Live Stream or Captured Photo Preview
               if (_capturedImageFile != null)
-                // Show captured photo preview
                 Container(
                   width: 350,
                   height: 350,
@@ -513,11 +520,7 @@ class _ScanScreenState extends State<ScanScreen>
                     color: Colors.white,
                     borderRadius: BorderRadius.circular(20),
                     boxShadow: [
-                      BoxShadow(
-                        color: Colors.blue.withOpacity(0.3),
-                        blurRadius: 30,
-                        spreadRadius: 10,
-                      ),
+                      BoxShadow(color: Colors.blue.withOpacity(0.3), blurRadius: 30, spreadRadius: 10),
                     ],
                   ),
                   child: ClipRRect(
@@ -531,7 +534,6 @@ class _ScanScreenState extends State<ScanScreen>
                   ),
                 )
               else if (_isPiConnected)
-                // Live MJPEG Stream from Pi
                 Container(
                   width: 350,
                   height: 350,
@@ -539,11 +541,7 @@ class _ScanScreenState extends State<ScanScreen>
                     color: Colors.black,
                     borderRadius: BorderRadius.circular(20),
                     boxShadow: [
-                      BoxShadow(
-                        color: Colors.blue.withOpacity(0.3),
-                        blurRadius: 30,
-                        spreadRadius: 10,
-                      ),
+                      BoxShadow(color: Colors.blue.withOpacity(0.3), blurRadius: 30, spreadRadius: 10),
                     ],
                   ),
                   child: ClipRRect(
@@ -556,16 +554,9 @@ class _ScanScreenState extends State<ScanScreen>
                           child: Column(
                             mainAxisAlignment: MainAxisAlignment.center,
                             children: [
-                              Icon(
-                                Icons.videocam_off,
-                                size: 50,
-                                color: Colors.grey,
-                              ),
+                              Icon(Icons.videocam_off, size: 50, color: Colors.grey),
                               SizedBox(height: 10),
-                              Text(
-                                'Connecting to camera...',
-                                style: TextStyle(color: Colors.white),
-                              ),
+                              Text('Connecting to camera...', style: TextStyle(color: Colors.white)),
                             ],
                           ),
                         );
@@ -577,7 +568,6 @@ class _ScanScreenState extends State<ScanScreen>
                   ),
                 )
               else
-                // Offline animation
                 ScaleTransition(
                   scale: _pulseAnimation,
                   child: Container(
@@ -587,38 +577,17 @@ class _ScanScreenState extends State<ScanScreen>
                       shape: BoxShape.circle,
                       color: Colors.white,
                       boxShadow: [
-                        BoxShadow(
-                          color: Colors.blue.withOpacity(0.3),
-                          blurRadius: 30,
-                          spreadRadius: 10,
-                        ),
+                        BoxShadow(color: Colors.blue.withOpacity(0.3), blurRadius: 30, spreadRadius: 10),
                       ],
                     ),
                     child: Column(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
-                        const Icon(
-                          Icons.wifi_off,
-                          size: 60,
-                          color: Colors.grey,
-                        ),
+                        const Icon(Icons.wifi_off, size: 60, color: Colors.grey),
                         const SizedBox(height: 16),
-                        Text(
-                          'Not Connected',
-                          style: TextStyle(
-                            fontSize: 18,
-                            fontWeight: FontWeight.w500,
-                            color: Colors.grey[600],
-                          ),
-                        ),
+                        Text('Not Connected', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w500, color: Colors.grey[600])),
                         const SizedBox(height: 8),
-                        Text(
-                          'Tap refresh to connect',
-                          style: TextStyle(
-                            fontSize: 14,
-                            color: Colors.grey[400],
-                          ),
-                        ),
+                        Text('Tap refresh to connect', style: TextStyle(fontSize: 14, color: Colors.grey[400])),
                       ],
                     ),
                   ),
@@ -626,50 +595,25 @@ class _ScanScreenState extends State<ScanScreen>
 
               const SizedBox(height: 30),
 
-              // Capture Button (when no photo captured yet)
               if (_capturedImageFile == null)
                 ElevatedButton.icon(
-                  onPressed: _isCapturing
-                      ? null
-                      : _uploadCapturedPhoto, //_capturePhoto,
+                  onPressed: _isCapturing ? null : _capturePhoto,
                   icon: _isCapturing
-                      ? const SizedBox(
-                          width: 24,
-                          height: 24,
-                          child: CircularProgressIndicator(
-                            strokeWidth: 2,
-                            color: Colors.white,
-                          ),
-                        )
+                      ? const SizedBox(width: 24, height: 24, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
                       : const Icon(Icons.camera_alt, size: 28),
                   label: Text(
-                    _isCapturing
-                        ? 'Capturing...'
-                        : (_isPiConnected
-                              ? 'Capture Photo'
-                              : 'Connect to Camera'),
-                    style: const TextStyle(
-                      fontSize: 18,
-                      fontWeight: FontWeight.w600,
-                    ),
+                    _isCapturing ? 'Capturing...' : (_isPiConnected ? 'Capture Photo' : 'Connect to Camera'),
+                    style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
                   ),
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: _isPiConnected
-                        ? Colors.blue.shade700
-                        : Colors.orange,
+                    backgroundColor: _isPiConnected ? Colors.blue.shade700 : Colors.orange,
                     foregroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 40,
-                      vertical: 16,
-                    ),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(30),
-                    ),
+                    padding: const EdgeInsets.symmetric(horizontal: 40, vertical: 16),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
                     elevation: 3,
                   ),
                 )
               else
-                // Retake and Upload buttons (when photo is captured)
                 Column(
                   children: [
                     Row(
@@ -682,80 +626,48 @@ class _ScanScreenState extends State<ScanScreen>
                           style: ElevatedButton.styleFrom(
                             backgroundColor: Colors.grey,
                             foregroundColor: Colors.white,
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 24,
-                              vertical: 12,
-                            ),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(30),
-                            ),
+                            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
                           ),
                         ),
                         const SizedBox(width: 20),
                         ElevatedButton.icon(
                           onPressed: _isUploading ? null : _uploadCapturedPhoto,
                           icon: _isUploading
-                              ? const SizedBox(
-                                  width: 20,
-                                  height: 20,
-                                  child: CircularProgressIndicator(
-                                    strokeWidth: 2,
-                                    color: Colors.white,
-                                  ),
-                                )
+                              ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
                               : const Icon(Icons.cloud_upload),
                           label: Text(_isUploading ? 'Uploading...' : 'Upload'),
                           style: ElevatedButton.styleFrom(
                             backgroundColor: Colors.green,
                             foregroundColor: Colors.white,
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 24,
-                              vertical: 12,
-                            ),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(30),
-                            ),
+                            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
                           ),
                         ),
                       ],
                     ),
                     const SizedBox(height: 16),
-                    const Text(
-                      'Tap Retake to go back to live view, or Upload to save',
-                      style: TextStyle(fontSize: 12, color: Colors.grey),
-                    ),
+                    const Text('Tap Retake to go back to live view, or Upload to save', style: TextStyle(fontSize: 12, color: Colors.grey)),
                   ],
                 ),
 
               const SizedBox(height: 40),
 
-              // Manual entry card
               Card(
                 elevation: 3,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(16),
-                ),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
                 child: Padding(
                   padding: const EdgeInsets.all(24),
                   child: Column(
                     children: [
-                      const Text(
-                        'Manual Entry',
-                        style: TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.w600,
-                          color: Colors.grey,
-                        ),
-                      ),
+                      const Text('Manual Entry', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: Colors.grey)),
                       const SizedBox(height: 12),
                       TextField(
                         controller: _healthIndexController,
                         keyboardType: TextInputType.number,
                         decoration: InputDecoration(
                           labelText: 'Health Index (0-100)',
-                          border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(12),
-                          ),
+                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
                           filled: true,
                           fillColor: Colors.grey[50],
                         ),
@@ -769,18 +681,11 @@ class _ScanScreenState extends State<ScanScreen>
                           style: ElevatedButton.styleFrom(
                             backgroundColor: Colors.blue.shade700,
                             foregroundColor: Colors.white,
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(12),
-                            ),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                           ),
                           child: _isUploading
-                              ? const CircularProgressIndicator(
-                                  color: Colors.white,
-                                )
-                              : const Text(
-                                  'Upload Health Index (Manual)',
-                                  style: TextStyle(fontSize: 16),
-                                ),
+                              ? const CircularProgressIndicator(color: Colors.white)
+                              : const Text('Upload Health Index (Manual)', style: TextStyle(fontSize: 16)),
                         ),
                       ),
                     ],
@@ -798,17 +703,13 @@ class _ScanScreenState extends State<ScanScreen>
   Future<void> _uploadHealthIndex() async {
     final input = _healthIndexController.text.trim();
     if (input.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please enter health index')),
-      );
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Please enter health index')));
       return;
     }
 
     final index = int.tryParse(input);
     if (index == null || index < 0 || index > 100) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please enter a number between 0-100')),
-      );
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Please enter a number between 0-100')));
       return;
     }
 
@@ -830,10 +731,7 @@ class _ScanScreenState extends State<ScanScreen>
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Upload successful! Returning to home...'),
-            backgroundColor: Colors.green,
-          ),
+          const SnackBar(content: Text('Upload successful! Returning to home...'), backgroundColor: Colors.green),
         );
 
         await Future.delayed(const Duration(milliseconds: 800));
@@ -847,10 +745,7 @@ class _ScanScreenState extends State<ScanScreen>
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Upload failed: $e'),
-            backgroundColor: Colors.red,
-          ),
+          SnackBar(content: Text('Upload failed: $e'), backgroundColor: Colors.red),
         );
       }
     } finally {
