@@ -1,7 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import 'report_detail_screen.dart';
-import 'custom_page_route.dart';
 
 class HistoryScreen extends StatefulWidget {
   const HistoryScreen({super.key});
@@ -12,32 +10,33 @@ class HistoryScreen extends StatefulWidget {
 
 class _HistoryScreenState extends State<HistoryScreen> {
   final _supabase = Supabase.instance.client;
-  String? _avatarUrl;
+  List<Map<String, dynamic>> _historyRecords = [];
+  bool _isLoading = true;
 
   @override
   void initState() {
     super.initState();
-    _loadUserAvatar();
+    _loadHistory();
   }
 
-  Future<void> _loadUserAvatar() async {
+  Future<void> _loadHistory() async {
     try {
       final user = _supabase.auth.currentUser;
       if (user == null) return;
 
       final data = await _supabase
-          .from('profiles')
-          .select('avatar_url')
-          .eq('id', user.id)
-          .single();
+          .from('examinations')
+          .select('id, health_index, image_url, uploaded_at, notes')
+          .eq('user_id', user.id)
+          .order('uploaded_at', ascending: false);
 
-      if (mounted) {
-        setState(() {
-          _avatarUrl = data['avatar_url'] as String?;
-        });
-      }
+      setState(() {
+        _historyRecords = List<Map<String, dynamic>>.from(data);
+        _isLoading = false;
+      });
     } catch (e) {
-      debugPrint('Failed to load avatar: $e');
+      debugPrint('Failed to load history: $e');
+      setState(() => _isLoading = false);
     }
   }
 
@@ -52,127 +51,86 @@ class _HistoryScreenState extends State<HistoryScreen> {
           'History',
           style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold, color: Colors.black87),
         ),
-        actions: [
-          Padding(
-            padding: const EdgeInsets.only(right: 16.0),
-            child: CircleAvatar(
-              radius: 22,
-              backgroundColor: Colors.white,
-              child: ClipOval(
-                child: _avatarUrl != null && _avatarUrl!.isNotEmpty
-                    ? Image.network(
-                        _avatarUrl!,
-                        fit: BoxFit.cover,
-                        width: 44,
-                        height: 44,
-                        errorBuilder: (_, __, ___) => const Icon(
-                          Icons.person,
-                          size: 28,
-                          color: Colors.grey,
-                        ),
-                      )
-                    : const Icon(
-                        Icons.person,
-                        size: 28,
-                        color: Colors.grey,
-                      ),  // 灰色默认头像
-              ),
-            ),
-          ),
-        ],
       ),
-      body: ListView.builder(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-        itemCount: historyRecords.length,
-        itemBuilder: (context, index) {
-          final record = historyRecords[index];
-          return Card(
-            margin: const EdgeInsets.only(bottom: 12),
-            elevation: 1.5,
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-            child: ListTile(
-              contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-              leading: Container(
-                width: 50,
-                height: 50,
-                decoration: BoxDecoration(
-                  color: Colors.pink.shade50,
-                  shape: BoxShape.circle,
-                ),
-                child: const Icon(Icons.access_time_rounded, color: Colors.pinkAccent, size: 28),
-              ),
-              title: Text(
-                'Inspection results: ${record['date']}',
-                style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
-              ),
-              subtitle: Padding(
-                padding: const EdgeInsets.only(top: 4),
-                child: Text('● ${record['relative']}', style: TextStyle(color: Colors.grey.shade700)),
-              ),
-              trailing: const Icon(Icons.chevron_right, color: Colors.grey, size: 28),
-              onTap: () {
-                Navigator.push(
-                  context,
-                  FadeScaleRoute(
-                    page: ReportDetailScreen(
-                      date: record['date'],
-                      reportData: record['report'],
-                    ),
+      body: _isLoading
+          ? const Center(child: CircularProgressIndicator())
+          : _historyRecords.isEmpty
+              ? const Center(
+                  child: Text(
+                    'No scan records yet.\nGo to Scan page to start.',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(fontSize: 16, color: Colors.grey),
                   ),
-                );
-              },
-            ),
-          );
-        },
-      ),
+                )
+              : ListView.builder(
+                  padding: const EdgeInsets.all(16),
+                  itemCount: _historyRecords.length,
+                  itemBuilder: (context, index) {
+                    final record = _historyRecords[index];
+                    final imageUrl = record['image_url'] as String?;
+                    final uploadedAt = record['uploaded_at'] != null
+                        ? DateTime.parse(record['uploaded_at']).toLocal()
+                        : null;
+
+                    return Card(
+                      margin: const EdgeInsets.only(bottom: 16),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                      elevation: 2,
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          // 显示照片
+                          if (imageUrl != null && imageUrl.isNotEmpty)
+                            ClipRRect(
+                              borderRadius: const BorderRadius.vertical(top: Radius.circular(16)),
+                              child: Image.network(
+                                imageUrl,
+                                height: 220,
+                                width: double.infinity,
+                                fit: BoxFit.cover,
+                                errorBuilder: (context, error, stackTrace) => Container(
+                                  height: 220,
+                                  color: Colors.grey[200],
+                                  child: const Center(
+                                    child: Icon(Icons.broken_image, size: 60, color: Colors.grey),
+                                  ),
+                                ),
+                              ),
+                            ),
+
+                          Padding(
+                            padding: const EdgeInsets.all(16),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  uploadedAt != null
+                                      ? 'Inspection ${uploadedAt.month.toString().padLeft(2, '0')}/${uploadedAt.day.toString().padLeft(2, '0')} '
+                                          '${uploadedAt.hour.toString().padLeft(2, '0')}:${uploadedAt.minute.toString().padLeft(2, '0')}'
+                                      : 'Inspection',
+                                  style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                                ),
+                                const SizedBox(height: 8),
+                                Text(
+                                  'Health Index: ${record['health_index'] ?? "N/A"}',
+                                  style: const TextStyle(fontSize: 16, color: Colors.black87),
+                                ),
+                                if (record['notes'] != null && record['notes'].toString().isNotEmpty)
+                                  Padding(
+                                    padding: const EdgeInsets.only(top: 4),
+                                    child: Text(
+                                      record['notes'],
+                                      style: TextStyle(fontSize: 14, color: Colors.grey[600]),
+                                    ),
+                                  ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                    );
+                  },
+                ),
     );
   }
-
-  final List<Map<String, dynamic>> historyRecords = [
-    {
-      'date': '2025.9.25',
-      'relative': '2 days ago',
-      'report': {
-        'title': '[This test report - 2025-9-25]',
-        'index': '78/100',
-        'indicators': [
-          {'name': 'Turbidity density', 'value': 'Level 2 (mild)', 'arrow': '→', 'color': Colors.orange},
-          {'name': 'Turbidity range', 'value': '15%', 'arrow': '↓', 'color': Colors.green},
-          {'name': 'Core Hardness', 'value': 'Level II', 'arrow': '→', 'color': Colors.orange},
-          {'name': 'Contrast sensitivity', 'value': '85 points', 'arrow': '↑', 'color': Colors.green},
-          {'name': 'Scattered light index', 'value': '3.5', 'arrow': '↓', 'color': Colors.green},
-          {'name': 'Predicted corrected visual acuity', 'value': '0.7', 'arrow': '→', 'color': Colors.orange},
-          {'name': 'Color identification', 'value': 'Deviation value 4.1', 'arrow': '↓', 'color': Colors.green},
-        ],
-      },
-    },
-    {
-      'date': '2025.9.24',
-      'relative': '3 days ago',
-      'report': {
-        'title': '[This test report - 2025-9-24]',
-        'index': '82/100',
-        'indicators': [
-          {'name': 'Turbidity density', 'value': 'Level 1 (normal)', 'arrow': '→', 'color': Colors.green},
-          {'name': 'Turbidity range', 'value': '12%', 'arrow': '↓', 'color': Colors.green},
-          {'name': 'Core Hardness', 'value': 'Level I', 'arrow': '↑', 'color': Colors.blue},
-          {'name': 'Contrast sensitivity', 'value': '90 points', 'arrow': '↑', 'color': Colors.green},
-          {'name': 'Scattered light index', 'value': '2.8', 'arrow': '↓', 'color': Colors.green},
-          {'name': 'Predicted corrected visual acuity', 'value': '0.9', 'arrow': '↑', 'color': Colors.green},
-          {'name': 'Color identification', 'value': 'Deviation value 2.5', 'arrow': '↓', 'color': Colors.green},
-        ],
-      },
-    },
-    {
-      'date': '2025.9.23',
-      'relative': '4 days ago',
-      'report': {
-        'title': '[This test report - 2025-9-23]',
-        'index': '75/100',
-        'indicators': [
-          {'name': 'Turbidity density', 'value': 'Level 3 (moderate)', 'arrow': '↓', 'color': Colors.red},
-        ],
-      },
-    },
-  ];
 }
