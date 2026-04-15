@@ -8,7 +8,6 @@ import 'main_navigator.dart';
 import 'package:android_intent_plus/android_intent.dart';
 import 'dart:convert';
 import 'package:flutter_mjpeg/flutter_mjpeg.dart';
-import 'package:path_provider/path_provider.dart';
 
 class ScanScreen extends StatefulWidget {
   const ScanScreen({super.key});
@@ -19,6 +18,9 @@ class ScanScreen extends StatefulWidget {
 
 class _ScanScreenState extends State<ScanScreen>
     with SingleTickerProviderStateMixin {
+  final String _gradioBaseUrl =
+      'https://perram27-cataract-detection-api.hf.space';
+
   late AnimationController _pulseController;
   late Animation<double> _pulseAnimation;
 
@@ -60,6 +62,7 @@ class _ScanScreenState extends State<ScanScreen>
     });
   }
 
+  // ========== Pi Connection Check ==========
   Future<void> _checkPiConnection({int retries = 3}) async {
     final connectivityResult = await Connectivity().checkConnectivity();
 
@@ -98,6 +101,7 @@ class _ScanScreenState extends State<ScanScreen>
     }
   }
 
+  // ========== Retake Photo ==========
   void _retakePhoto() {
     setState(() {
       _capturedImageFile = null;
@@ -105,6 +109,7 @@ class _ScanScreenState extends State<ScanScreen>
     });
   }
 
+  // ========== Capture Photo from Pi ==========
   Future<void> _capturePhoto() async {
     await _checkPiConnection();
 
@@ -182,10 +187,11 @@ class _ScanScreenState extends State<ScanScreen>
       }
     } catch (e) {
       print('Capture error: $e');
+      final msg = e.toString();
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Capture failed: ${e.toString().substring(0, 100)}'),
+            content: Text('Capture failed: ${msg.length > 100 ? msg.substring(0, 100) : msg}'),
             backgroundColor: Colors.red,
           ),
         );
@@ -199,6 +205,7 @@ class _ScanScreenState extends State<ScanScreen>
     }
   }
 
+  // ========== Show Pi Connection Dialog ==========
   Future<bool> _showPiConnectionDialog() async {
     return await showDialog<bool>(
           context: context,
@@ -228,6 +235,7 @@ class _ScanScreenState extends State<ScanScreen>
         false;
   }
 
+  // ========== Open Wi-Fi Settings ==========
   Future<void> _openWifiSettings() async {
     try {
       final AndroidIntent intent = AndroidIntent(
@@ -243,17 +251,28 @@ class _ScanScreenState extends State<ScanScreen>
     }
   }
 
+  // ========== Upload Captured Photo to Cloud AI ==========
   Future<void> _uploadCapturedPhoto() async {
-    if (_capturedImageFile == null) return;
+    if (_capturedImageFile == null) {
+      // If no image captured yet, just capture one
+      await _capturePhoto();
+      if (_capturedImageFile == null) return;
+    }
 
     setState(() => _isUploading = true);
 
     try {
+      // First, get the image data BEFORE disconnecting
+      final bytes = await _capturedImageFile!.readAsBytes();
+      final base64Image = base64Encode(bytes);
+      final String dataUri = 'data:image/jpeg;base64,$base64Image';
+
+      // Show dialog telling user to disconnect from Pi Wi-Fi
       await showDialog(
         context: context,
         barrierDismissible: false,
         builder: (context) => AlertDialog(
-          title: const Text('Upload to Cloud'),
+          title: const Text('Upload to Cloud AI'),
           content: const Text(
             'Your phone is currently connected to Scanaract_Wifi.\n\n'
             'To upload to cloud, please:\n'
@@ -272,35 +291,138 @@ class _ScanScreenState extends State<ScanScreen>
         ),
       );
 
+      // Wait for network to switch to mobile data
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Processing scan with AI...'),
-          duration: Duration(seconds: 3),
+          content: Text('📡 Connecting to cloud...'),
+          duration: Duration(seconds: 2),
+        ),
+      );
+      await Future.delayed(const Duration(seconds: 3));
+
+      // Show processing
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('🤖 AI analyzing your eye scan...'),
+          duration: Duration(seconds: 2),
         ),
       );
 
-      await Future.delayed(const Duration(seconds: 3));
-
+      // Step 1: Upload to Supabase Storage first (to get public URL)
       final user = _supabase.auth.currentUser;
-      if (user != null) {
-        final nowLocal = DateTime.now().toLocal();
-        await _supabase.from('examinations').insert({
-          'user_id': user.id,
-          'health_index': 75, // Placeholder
-          'scan_date': nowLocal.toIso8601String(),
-          'notes': 'Captured via Pi camera',
-        });
+      if (user == null) throw Exception('Not logged in');
+
+      final fileName = 'scan_${DateTime.now().millisecondsSinceEpoch}.jpg';
+      final filePath = 'scans/${user.id}/$fileName';
+
+      // Upload to Supabase Storage
+      await _supabase.storage.from('inspection_results').uploadBinary(
+            filePath,
+            bytes,
+            fileOptions: const FileOptions(contentType: 'image/jpeg'),
+          );
+
+      // Get public URL
+      final imageUrl = _supabase.storage.from('inspection_results').getPublicUrl(filePath);
+      print('Image uploaded to: $imageUrl');
+
+      // Step 2: Send to Gradio API
+      final postUrl = Uri.parse('$_gradioBaseUrl/gradio_api/call/predict');
+      final postResponse = await http
+          .post(
+            postUrl,
+            headers: {'Content-Type': 'application/json'},
+            body: jsonEncode({
+              "data": [
+                {
+                  "path": imageUrl,
+                  "meta": {"_type": "gradio.FileData"},
+                },
+              ],
+            }),
+          )
+          .timeout(const Duration(seconds: 30));
+
+      if (postResponse.statusCode != 200) {
+        throw Exception('Failed to submit prediction: ${postResponse.body}');
       }
+
+      final postResult = jsonDecode(postResponse.body);
+      final String? eventId = postResult['event_id'];
+
+      if (eventId == null) {
+        throw Exception('Server did not return an event_id.');
+      }
+
+      // Step 3: Get results
+      final getUrl = Uri.parse('$_gradioBaseUrl/gradio_api/call/predict/$eventId');
+
+      final client = http.Client();
+      final request = http.Request('GET', getUrl);
+      final streamedResponse = await client
+          .send(request)
+          .timeout(const Duration(seconds: 60));
+
+      String finalPrediction = 'Unknown';
+      String finalDetails = '';
+      bool isComplete = false;
+
+      final stream = streamedResponse.stream
+          .transform(utf8.decoder)
+          .transform(const LineSplitter());
+
+      await for (var line in stream) {
+        if (line.startsWith('event: complete')) {
+          isComplete = true;
+        } else if (isComplete && line.startsWith('data: ')) {
+          final dataStr = line.substring(6);
+          final List<dynamic> resultData = jsonDecode(dataStr);
+          if (resultData.isNotEmpty) {
+            finalPrediction = resultData[0]?.toString() ?? 'No prediction';
+            if (resultData.length > 1) {
+              finalDetails = resultData[1]?.toString() ?? 'No details';
+            }
+          }
+          break;
+        } else if (line.startsWith('event: error')) {
+          throw Exception('AI model encountered an error.');
+        }
+      }
+      client.close();
+
+      if (!isComplete) {
+        throw Exception('Connection closed before AI finished.');
+      }
+
+      // Step 4: Calculate health index
+      int calculatedHealthIndex = 50;
+      final lowerPrediction = finalPrediction.toLowerCase();
+      if (lowerPrediction.contains('normal') || lowerPrediction.contains('healthy')) {
+        calculatedHealthIndex = 100;
+      } else if (lowerPrediction.contains('cataract')) {
+        calculatedHealthIndex = 20;
+      }
+
+      // Step 5: Save to Supabase Database
+      final nowLocal = DateTime.now().toLocal();
+      await _supabase.from('examinations').insert({
+        'user_id': user.id,
+        'health_index': calculatedHealthIndex,
+        'scan_date': nowLocal.toIso8601String(),
+        'notes': 'AI Result: $finalPrediction\nDetails: $finalDetails',
+        'image_url': imageUrl,
+      });
 
       if (mounted) {
         await showDialog(
           context: context,
           builder: (context) => AlertDialog(
-            title: const Text('Upload Complete'),
-            content: const Text(
-              'Your scan has been submitted.\n\n'
-              'Results will appear in your History tab.\n'
-              'You can reconnect to Scanaract_Wifi to scan again.',
+            title: const Text('✅ Upload Complete'),
+            content: Text(
+              'AI Analysis Result:\n\n'
+              'Prediction: $finalPrediction\n\n'
+              'Health Index: $calculatedHealthIndex/100\n\n'
+              'Results saved to your history.',
             ),
             actions: [
               TextButton(
@@ -323,11 +445,13 @@ class _ScanScreenState extends State<ScanScreen>
         _capturedImageUrl = null;
       });
     } catch (e) {
+      print('Upload error: $e');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Upload failed: $e'),
+            content: Text('Upload failed: ${e.toString().substring(0, 150)}'),
             backgroundColor: Colors.red,
+            duration: const Duration(seconds: 5),
           ),
         );
       }
@@ -575,6 +699,7 @@ class _ScanScreenState extends State<ScanScreen>
     );
   }
 
+  // Manual upload method
   Future<void> _uploadHealthIndex() async {
     final input = _healthIndexController.text.trim();
     if (input.isEmpty) {
