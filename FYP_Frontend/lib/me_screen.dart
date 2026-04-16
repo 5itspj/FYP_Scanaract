@@ -1,8 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import 'data_overview_screen.dart';
 import 'edit_account_screen.dart';
-import 'data_export_screen.dart';
 import 'help_screen.dart';
 import 'custom_page_route.dart';
 import 'main_navigator.dart';
@@ -94,7 +92,7 @@ class _MeScreenState extends State<MeScreen> {
                         height: 56,
                         errorBuilder: (_, __, ___) => const Icon(Icons.person, size: 40, color: Colors.grey),
                       )
-                    : const Icon(Icons.person, size: 40, color: Colors.grey),  
+                    : const Icon(Icons.person, size: 40, color: Colors.grey),
               ),
             ),
           ),
@@ -136,14 +134,6 @@ class _MeScreenState extends State<MeScreen> {
 
                     _buildAnimatedListItem(
                       index: 0,
-                      icon: Icons.storage_rounded,
-                      title: 'Data Overview',
-                      onTap: () => Navigator.push(context, SlideRightRoute(page: const DataOverviewScreen())),
-                    ),
-
-                    const SizedBox(height: 8),
-                    _buildAnimatedListItem(
-                      index: 1,
                       icon: Icons.person_outline_rounded,
                       title: 'Edit Account',
                       onTap: () async {
@@ -154,7 +144,6 @@ class _MeScreenState extends State<MeScreen> {
 
                         if (updated == true && mounted) {
                           _loadUserProfile();
-
                           Navigator.pushAndRemoveUntil(
                             context,
                             MaterialPageRoute(builder: (context) => const MainNavigator()),
@@ -167,16 +156,7 @@ class _MeScreenState extends State<MeScreen> {
                     const SizedBox(height: 8),
 
                     _buildAnimatedListItem(
-                      index: 2,
-                      icon: Icons.file_upload_outlined,
-                      title: 'Data Export',
-                      onTap: () => Navigator.push(context, SlideRightRoute(page: const DataExportScreen())),
-                    ),
-
-                    const SizedBox(height: 8),
-
-                    _buildAnimatedListItem(
-                      index: 3,
+                      index: 1,
                       icon: Icons.help_outline_rounded,
                       title: 'Help',
                       onTap: () => Navigator.push(context, SlideRightRoute(page: const HelpScreen())),
