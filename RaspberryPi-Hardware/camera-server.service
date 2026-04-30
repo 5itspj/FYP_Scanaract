@@ -1,0 +1,14 @@
+[Unit]
+Description=Flask Camera Server
+After=network.target
+
+[Service]
+User=scanaractpi
+WorkingDirectory=/home/scanaractpi/scanaract_fyp
+ExecStart=/usr/bin/python3 /home/scanaractpi/scanaract_fyp/app.py
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+
