@@ -246,37 +246,6 @@ def capture_fast():
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)})
 
-@app.route('/capture_hd')
-def capture_hd():
-    """High quality capture (slower but better resolution)"""
-    try:
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        filename = f"photo_{timestamp}.jpg"
-        filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
-
-        cam = get_camera()
-        if cam is None or not cam.isOpened():
-            return jsonify({'success': False, 'error': 'Camera not available'})
-        
-        with camera_lock:
-            original_w = cam.get(cv2.CAP_PROP_FRAME_WIDTH)
-            original_h = cam.get(cv2.CAP_PROP_FRAME_HEIGHT)
-            cam.set(cv2.CAP_PROP_FRAME_WIDTH, 1920)
-            cam.set(cv2.CAP_PROP_FRAME_HEIGHT, 1080)
-            time.sleep(0.2)
-            for i in range(3):
-                cam.read()
-            ret, frame = cam.read()
-            cam.set(cv2.CAP_PROP_FRAME_WIDTH, original_w)
-            cam.set(cv2.CAP_PROP_FRAME_HEIGHT, original_h)
-
-        if ret and frame is not None:
-            cv2.imwrite(filepath, frame)
-            return jsonify({'success': True, 'filename': filename, 'url': f'static/photos/{filename}'})
-        return jsonify({'success': False, 'error': 'Capture failed'})
-    except Exception as e:
-        return jsonify({'success': False, 'error': str(e)})
-
 # Keep original capture endpoint for compatibility
 @app.route('/capture')
 def capture_photo():
