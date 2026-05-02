@@ -1,6 +1,6 @@
 ## Setup Instructions
 
-Before using this project, please ensure your local environment is set to **Python 3.11.15**， **torch2.5.1+cu121 **. Then, install all required libraries by running `pip install` while referencing the code file.
+Before using this project, please ensure your local environment is set to **Python 3.11.15**， **torch2.5.1+cu121**. Then, install all required libraries by running `pip install` while referencing the code file.
 
 ## Hybrid ViT Model Weights
 .pth file [Google drive link](https://drive.google.com/drive/folders/1LEva-TB_YGJxGrtO_zhwI_l1oPCVG76x?usp=sharing)
