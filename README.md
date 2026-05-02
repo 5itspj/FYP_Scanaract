@@ -30,6 +30,7 @@ FYP_Scanaract/
 │ ├── comparison.png # Model comparison results
 │ ├── custom_predictions.png # Sample predictions
 │ └── readme.md # ResNet50-specific documentation
+| └── for model, please download at https://drive.google.com/file/d/13rBgLFD9fbEoSDMaJ3C9BNjmM-BteV_C/view?usp=sharing
 │
 ├── FYP_Frontend/ # Flutter mobile application
 │ └── lib/ # Dart files (screens, widgets)
