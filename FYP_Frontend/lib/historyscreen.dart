@@ -79,7 +79,6 @@ class _HistoryScreenState extends State<HistoryScreen> {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          // 显示照片
                           if (imageUrl != null && imageUrl.isNotEmpty)
                             ClipRRect(
                               borderRadius: const BorderRadius.vertical(top: Radius.circular(16)),

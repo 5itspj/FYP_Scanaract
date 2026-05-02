@@ -28,11 +28,11 @@ class _MainNavigatorState extends State<MainNavigator> with TickerProviderStateM
     super.initState();
 
     _pages = [
-      HomeScreen(),          // 0
-      HistoryScreen(),       // 1
-      ScanScreen(),          // 2
-      MeScreen(),            // 3
-      AboutUsScreen(),       // 4 
+      HomeScreen(),          
+      HistoryScreen(),       
+      ScanScreen(),          
+      MeScreen(),            
+      AboutUsScreen(),      
     ];
 
     _pulseController = AnimationController(
@@ -88,8 +88,8 @@ class _MainNavigatorState extends State<MainNavigator> with TickerProviderStateM
       case 0: return Offset(-maxOffset, -maxOffset);
       case 1: return Offset(-maxOffset, maxOffset);
       case 2: return Offset(0, 0);
-      case 3: return Offset(maxOffset, maxOffset);   // Me
-      case 4: return Offset(maxOffset, -maxOffset);  // About Us
+      case 3: return Offset(maxOffset, maxOffset);  
+      case 4: return Offset(maxOffset, -maxOffset);  
       default: return Offset(0, 0);
     }
   }
