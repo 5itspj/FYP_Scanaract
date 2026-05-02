@@ -72,7 +72,6 @@ def generate_frames():
                            b'Content-Type: image/jpeg\r\n\r\n' + buffer.tobytes() + b'\r\n')
         time.sleep(0.033)
 
-# HTML template with delete button and better UI
 HTML_TEMPLATE = """
 <!DOCTYPE html>
 <html>
